@@ -31,7 +31,7 @@ test('app.html keeps the editor shell and app assets', async () => {
 test('home page embeds the Moe-Counter SVG image', async () => {
 	const html = await readFile('public/home.html', 'utf8')
 
-	assert.match(html, /src="http:\/\/8\.138\.201\.201:18080\/@webtimeline\?theme=pr-lumina"/)
+	assert.match(html, /src="https:\/\/api\.kanonouta\.com\/@webtimeline\?theme=pr-lumina"/)
 	// Counter image height is constrained to avoid layout blow-up.
 	assert.match(html, /\.home-counter img\s*\{[^}]*height:\s*112px/s)
 })
