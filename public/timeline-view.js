@@ -59,6 +59,7 @@ export function timelineRowsForPhase(rows, bossSource = null, phaseId = 'all') {
 	if (!phase) {
 		return rows
 	}
+	const phaseDurationMs = Math.max(0, phase.endMs - phase.startMs)
 	return rows
 		.map(row => {
 			if (row.html) {
@@ -68,7 +69,8 @@ export function timelineRowsForPhase(rows, bossSource = null, phaseId = 'all') {
 				...row,
 				items: (row.items ?? [])
 					.filter(item => itemOverlapsPhase(item, phase, phaseId))
-					.map(item => rebaseItemToPhase(item, phase, phaseId)),
+					.map(item => rebaseItemToPhase(item, phase, phaseId))
+					.filter(item => Number(item.startMs) < phaseDurationMs),
 			}
 		})
 		.filter(row => row.html || row.keepWhenEmpty || row.items.length > 0)
@@ -186,7 +188,7 @@ function rebaseItemToPhase(item, phase, phaseId = 'all') {
 	const phaseStartMs = taggedPhase === phaseId && Number.isFinite(Number(item.phaseStartMs))
 		? Number(item.phaseStartMs)
 		: phase.startMs
-	const phaseDurationMs = phase.endMs - phase.startMs
+	const phaseDurationMs = Math.max(0, phase.endMs - phase.startMs)
 	const startMs = Math.max(0, absoluteStartMs - phaseStartMs)
 	const endMs = Math.min(phaseDurationMs, Math.max(startMs, absoluteEndMs - phaseStartMs))
 	return {

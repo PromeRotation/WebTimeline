@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>WebTimeline</title>
+	<style>
+		/* ════════════════════════════════════════════════════════════════
+		   Welcome page — self-contained Claude/Anthropic-inspired theme.
+		   Does NOT load or depend on the main app's styles.css.
+		   ════════════════════════════════════════════════════════════════ */
+		:root {
+			color-scheme: light;
+			--paper: #faf9f5;
+			--paper-soft: #f5f0e6;
+			--ink: #1a1915;
+			--ink-soft: #3d3d3a;
+			--muted: #8a8580;
+			--hairline: #e4ddd0;
+			--accent: #cc785c;
+			--accent-soft: rgba(204, 120, 92, 0.08);
+			--accent-hover: #b86a4e;
+			--code-bg: #f0ebe0;
+			--font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Hiragino Sans", "Noto Sans JP", sans-serif;
+			--font-mono: "SF Mono", "Cascadia Code", "Fira Code", "Consolas", "Noto Sans Mono CJK SC", monospace;
+			--font-display: Georgia, "Times New Roman", "Noto Serif SC", serif;
+		}
+
+		*, *::before, *::after { box-sizing: border-box; }
+
+		html, body {
+			margin: 0;
+			padding: 0;
+			min-height: 100vh;
+		}
+
+		body {
+			font-family: var(--font-sans);
+			background: var(--paper);
+			color: var(--ink);
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			-webkit-font-smoothing: antialiased;
+			-moz-osx-font-smoothing: grayscale;
+		}
+
+		/* ── subtle top hairline accent ── */
+		body::before {
+			content: "";
+			position: fixed;
+			top: 0; left: 0; right: 0;
+			height: 2px;
+			background: var(--accent);
+			opacity: 0.7;
+			z-index: 100;
+		}
+
+		.home-main {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 28px;
+			padding: 60px 24px 40px;
+			max-width: 640px;
+			width: 100%;
+		}
+
+		/* ── terminal status strip ── */
+		.home-terminal {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			font-family: var(--font-mono);
+			font-size: 12px;
+			color: var(--muted);
+			background: var(--code-bg);
+			border: 1px solid var(--hairline);
+			border-radius: 6px;
+			padding: 5px 14px;
+		}
+
+		.home-terminal .dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: #5db872;
+			flex-shrink: 0;
+		}
+
+		.home-terminal .cmd { color: var(--ink-soft); }
+		.home-terminal .flag { color: var(--accent); }
+
+		/* ── hero ── */
+		.home-hero {
+			text-align: center;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 14px;
+		}
+
+		.home-title {
+			font-family: var(--font-display);
+			font-size: clamp(36px, 8vw, 52px);
+			font-weight: 700;
+			letter-spacing: -0.02em;
+			margin: 0;
+			line-height: 1.1;
+		}
+
+		.home-title .accent { color: var(--accent); }
+
+		.home-subtitle {
+			font-size: 16px;
+			line-height: 1.6;
+			color: var(--ink-soft);
+			margin: 0;
+			font-weight: 500;
+		}
+
+		/* ── counter / welcome line ── */
+		.home-counter {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 10px;
+			font-size: 15px;
+			color: var(--ink-soft);
+			font-weight: 500;
+			text-align: center;
+		}
+
+		.home-counter .counter-text {
+			line-height: 1.5;
+		}
+
+		.home-counter img {
+			display: block;
+			height: 112px;
+			width: auto;
+			border-radius: 6px;
+		}
+
+		/* ── enter button ── */
+		.home-enter {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			font-family: var(--font-sans);
+			font-size: 15px;
+			font-weight: 600;
+			color: #fff;
+			background: var(--accent);
+			border: 1px solid var(--accent);
+			border-radius: 8px;
+			padding: 11px 32px;
+			cursor: pointer;
+			text-decoration: none;
+			transition: background 140ms ease, transform 100ms ease, box-shadow 140ms ease;
+			box-shadow: 0 2px 8px rgba(204, 120, 92, 0.18);
+			margin-top: 4px;
+		}
+
+		.home-enter:hover {
+			background: var(--accent-hover);
+			border-color: var(--accent-hover);
+			box-shadow: 0 4px 14px rgba(204, 120, 92, 0.28);
+		}
+
+		.home-enter:active {
+			transform: translateY(1px);
+			box-shadow: 0 1px 4px rgba(204, 120, 92, 0.2);
+		}
+
+		.home-enter svg {
+			width: 16px;
+			height: 16px;
+			flex-shrink: 0;
+		}
+
+		/* ── lang switcher ── */
+		.home-lang {
+			display: flex;
+			align-items: center;
+			gap: 2px;
+			font-size: 12px;
+		}
+
+		.home-lang button {
+			font-family: var(--font-sans);
+			font-size: 12px;
+			font-weight: 600;
+			color: var(--muted);
+			background: transparent;
+			border: 1px solid transparent;
+			border-radius: 5px;
+			padding: 4px 10px;
+			cursor: pointer;
+			transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+		}
+
+		.home-lang button:hover {
+			color: var(--ink);
+		}
+
+		.home-lang button.active {
+			color: var(--accent);
+			background: var(--accent-soft);
+			border-color: var(--hairline);
+		}
+
+		/* ── footer ── */
+		.home-footer {
+			width: 100%;
+			max-width: 640px;
+			padding: 0 24px 28px;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			font-size: 12px;
+			color: var(--muted);
+			font-weight: 500;
+		}
+
+		.home-footer span { white-space: nowrap; }
+
+		/* ── responsive ── */
+		@media (max-width: 480px) {
+			.home-main { gap: 22px; padding-top: 48px; }
+			.home-terminal { font-size: 11px; padding: 4px 12px; }
+			.home-counter { font-size: 14px; gap: 8px; }
+			.home-counter img { height: 80px; }
+			.home-footer { flex-direction: column; gap: 6px; text-align: center; }
+		}
+	</style>
+</head>
+<body>
+	<main class="home-main">
+		<div class="home-terminal">
+			<span class="dot"></span>
+			<span class="cmd">webtimeline</span>
+			<span class="flag">--ready</span>
+		</div>
+
+		<div class="home-hero">
+			<h1 class="home-title">Web<span class="accent">Timeline</span></h1>
+			<p class="home-subtitle" data-i18n="subtitle">FF14 时间轴编辑器 / ACR 辅助工具</p>
+		</div>
+
+		<div class="home-counter">
+			<span class="counter-text" data-i18n="counterPrefix">使用次数</span>
+			<img src="http://8.138.201.201:18080/@webtimeline?theme=pr-lumina" alt="visitor counter" referrerpolicy="no-referrer">
+		</div>
+
+		<a class="home-enter" href="./app.html">
+			<span data-i18n="enter">进入编辑器</span>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+		</a>
+
+		<div class="home-lang" role="group" aria-label="Language">
+			<button type="button" data-lang="zh-CN" class="active">简中</button>
+			<button type="button" data-lang="zh-TW">繁中</button>
+			<button type="button" data-lang="ja-JP">日本語</button>
+		</div>
+	</main>
+
+	<footer class="home-footer">
+		<span>v0.1.0 · pr大团体</span>
+	</footer>
+
+	<script>
+		const I18N = {
+			'zh-CN': {
+				subtitle: 'FF14 时间轴编辑器 / ACR 辅助工具',
+			counterPrefix: '使用次数',
+			enter: '进入编辑器',
+		},
+			'zh-TW': {
+				subtitle: 'FF14 時間軸編輯器 / ACR 輔助工具',
+			counterPrefix: '使用次數',
+			enter: '進入編輯器',
+		},
+			'ja-JP': {
+				subtitle: 'FF14 タイムラインエディタ / ACR 補助ツール',
+			counterPrefix: '使用回数',
+			enter: 'エディタへ',
+		},
+		}
+
+		const STORAGE_KEY = 'webtimelineLanguage'
+		const SUPPORTED = ['zh-CN', 'zh-TW', 'ja-JP']
+
+		function detectLang() {
+			const stored = localStorage.getItem(STORAGE_KEY)
+			if (stored && SUPPORTED.includes(stored)) return stored
+			return 'zh-CN'
+		}
+
+		function applyLang(lang) {
+			const dict = I18N[lang] ?? I18N['zh-CN']
+			document.documentElement.lang = lang
+			document.querySelectorAll('[data-i18n]').forEach(el => {
+				const key = el.dataset.i18n
+				if (dict[key]) el.textContent = dict[key]
+			})
+			document.querySelectorAll('.home-lang button').forEach(btn => {
+				btn.classList.toggle('active', btn.dataset.lang === lang)
+			})
+		}
+
+		document.querySelectorAll('.home-lang button').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const lang = btn.dataset.lang
+				localStorage.setItem(STORAGE_KEY, lang)
+				applyLang(lang)
+			})
+		})
+
+		applyLang(detectLang())
+	</script>
+</body>
+</html>

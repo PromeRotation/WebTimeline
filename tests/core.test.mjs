@@ -1,15 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import {loadFixture, flattenTimeline, buildModeTracks, buildTimelineRows} from '../src/timeline-data.mjs'
 import {estimateDamage} from '../src/simulation.mjs'
-import {buildAcrDatabase, discoverAcrSources, discoverSourceAcr} from '../src/acr-database.mjs'
+import {buildAcrDatabase, discoverAcrSources, discoverPromeRotationSource, discoverSourceAcr} from '../src/acr-database.mjs'
 import {createPrototypeModel} from '../src/app-model.mjs'
 import {buildSkillDatabase, classifyAction, COMBAT_JOBS} from '../src/skill-database.mjs'
 import {buildKanoDrkSimulation} from '../src/acr-simulation.mjs'
 import {loadKanoDrkSourceOpener} from '../src/acr-source-opener.mjs'
 
+const KANO_FIXTURE = '../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json'
+
 test('flattens a PR tree timeline into editable events with cast badges', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const events = flattenTimeline(fixture)
 
 	assert.equal(fixture.Meta.TerritoryId, 1363)
@@ -19,7 +24,7 @@ test('flattens a PR tree timeline into editable events with cast badges', async 
 })
 
 test('builds beginner and expert tracks from the same source events', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const tracks = buildModeTracks(flattenTimeline(fixture))
 
 	assert.ok(tracks.beginner.burst.some(group => group.window === '60s' || group.window === '120s'))
@@ -29,7 +34,7 @@ test('builds beginner and expert tracks from the same source events', async () =
 })
 
 test('uses action ids for displayed skill names while preserving timeline labels', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const events = flattenTimeline(fixture)
 	const blackestNight = events.find(event => Number(event.actionId) === 7393 && /黑盾/.test(event.timelineLabel ?? ''))
 	const reprisal = events.find(event => Number(event.actionId) === 7535 && /血仇|雪仇/.test(event.timelineLabel ?? ''))
@@ -47,6 +52,34 @@ test('uses action ids for displayed skill names while preserving timeline labels
 	for (const [actionId, name] of expectedNames) {
 		assert.equal(events.find(event => event.kind === 'player-action' && Number(event.actionId) === actionId)?.name, name)
 	}
+})
+
+test('keeps the same phase origin stable when nested PR nodes repeat a phase label', async () => {
+	const fixture = await loadFixture(KANO_FIXTURE)
+	const events = flattenTimeline(fixture)
+	const p1Reprisals = events.filter(event => Number(event.actionId) === 7535 && event.phase === 'P1')
+
+	assert.ok(p1Reprisals.length > 1)
+	assert.deepEqual([...new Set(p1Reprisals.map(event => event.phaseStartMs))], [0])
+})
+
+test('default skill data keeps role mitigation recasts for timeline cooldown checks', () => {
+	const skillDatabase = buildSkillDatabase()
+
+	assert.equal(skillDatabase.actionsById[7535].recastMs, 60000)
+})
+
+test('mitigation tracks hide impossible duplicate uses inside the same action cooldown', () => {
+	const events = [
+		{id: 'reprisal-1', kind: 'player-action', actionId: 7535, name: 'Reprisal', timeMs: 0, classification: 'mitigation', durationMs: 15000, recastMs: 60000},
+		{id: 'reprisal-duplicate', kind: 'player-action', actionId: 7535, name: 'Reprisal', timeMs: 28000, classification: 'mitigation', durationMs: 15000, recastMs: 60000},
+		{id: 'reprisal-ready', kind: 'player-action', actionId: 7535, name: 'Reprisal', timeMs: 61000, classification: 'mitigation', durationMs: 15000, recastMs: 60000},
+	]
+	const tracks = buildModeTracks(events)
+	const rows = buildTimelineRows(events)
+
+	assert.deepEqual(tracks.expert.mitigation.map(event => event.id), ['reprisal-1', 'reprisal-ready'])
+	assert.deepEqual(rows.find(row => row.id === 'mitigation-actions').items.map(item => item.id), ['reprisal-1', 'reprisal-ready'])
 })
 
 test('estimates phase and total damage with adjustable luck profile', async () => {
@@ -95,8 +128,41 @@ test('discovers job support from decompiled ACR folders', async () => {
 	assert.deepEqual(byPackage.get('Ahxq').sort(), ['DNC', 'MCH', 'VPR'])
 	assert.ok(byPackage.get('MilkVio').includes('WHM'))
 	assert.ok(byPackage.get('MilkVio').includes('PCT'))
-	assert.ok(byPackage.get('XSZYYS').includes('PLD'))
+	assert.deepEqual(byPackage.get('XSZYYS'), ['PLD', 'WAR', 'DRK'])
 	assert.ok(byPackage.get('Wotou').includes('BRD'))
+})
+
+test('discovers the PromeRotation main source from the official job catalog', async () => {
+	const source = await discoverPromeRotationSource('../资源/source/PromeRotation-1.0')
+	const expectedJobs = COMBAT_JOBS
+		.filter(job => job.role !== 'Limited')
+		.map(job => job.id)
+
+	assert.equal(source.package, 'PromeRotation')
+	assert.equal(source.kind, 'runtime')
+	assert.equal(source.source, 'PR 本体源码')
+	assert.deepEqual(source.jobs, expectedJobs)
+	assert.match(source.path, /PromeRotation-1\.0/)
+})
+
+test('reads BOM-prefixed decompile manifests when naming discovered packages', async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), 'webtimeline-acr-manifest-'))
+	try {
+		const acrDir = path.join(root, 'opaque_output_name')
+		await mkdir(acrDir)
+		await writeFile(path.join(acrDir, 'WhiteMage.cs'), 'public class WhiteMage {}', 'utf8')
+		await writeFile(path.join(root, 'decompile-manifest.json'), `\ufeff${JSON.stringify([{
+			package: 'ManifestPkg',
+			output: acrDir,
+		}])}`, 'utf8')
+
+		const sources = await discoverAcrSources(root)
+
+		assert.equal(sources[0].package, 'ManifestPkg')
+		assert.deepEqual(sources[0].jobs, ['WHM'])
+	} finally {
+		await rm(root, {recursive: true, force: true})
+	}
 })
 
 test('discovers KANO DRK support from the source ACR project', async () => {
@@ -232,7 +298,7 @@ test('reads the KANO DRK opener directly from the ACR source file', async () => 
 })
 
 test('keeps mitigation, invuln and utility actions out of the output axis', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'])
 	const damagePanel = model.detailPanels.find(panel => panel.id === 'damage')
 	const forbidden = /无敌|黑盾|铁壁|献奉|暗黑布道|暗影卫|弃明投暗|挑衅|退避|雪仇/
@@ -242,7 +308,7 @@ test('keeps mitigation, invuln and utility actions out of the output axis', asyn
 })
 
 test('uses simulated ACR output for the damage panel without counting simulated mitigations', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'])
 	const damagePanel = model.detailPanels.find(panel => panel.id === 'damage')
 
@@ -253,7 +319,7 @@ test('uses simulated ACR output for the damage panel without counting simulated 
 })
 
 test('adds the timeline opener as a detail panel beside mitigation, damage and potion', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const sourceOpener = await loadKanoDrkSourceOpener(buildSkillDatabase())
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'], null, {sourceOpener})
 	const openerPanel = model.detailPanels.find(panel => panel.id === 'opener')
@@ -266,40 +332,26 @@ test('adds the timeline opener as a detail panel beside mitigation, damage and p
 })
 
 test('creates a front-end model for the first WebTimeline prototype', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'])
 
 	assert.equal(model.encounter.territoryId, 1363)
 	assert.deepEqual(model.editorModes.map(mode => mode.id), ['unified'])
 	assert.deepEqual(model.detailPanels.map(panel => panel.id), ['mitigation', 'damage', 'potion', 'opener'])
-	assert.equal(model.onboarding.length, 4)
+	assert.equal('onboarding' in model, false)
 	assert.equal(model.shareCard.timelineName, model.encounter.name)
 	assert.equal(model.shareCard.title, '分享预览')
 })
 
-test('onboarding explains the unified editor flow without stale mode names', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+test('prototype model omits the retired onboarding flow', async () => {
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'])
-	const onboardingText = model.onboarding.map(step => `${step.title} ${step.body}`).join('\n')
 
-	assert.match(onboardingText, /ACR 作者/)
-	assert.match(onboardingText, /代码编辑/)
-	assert.match(onboardingText, /耗时/)
-	assert.match(onboardingText, /门槛高/)
-	assert.match(onboardingText, /选职业/)
-	assert.match(onboardingText, /选 ACR/)
-	assert.match(onboardingText, /看白轴/)
-	assert.match(onboardingText, /调爆发/)
-	assert.match(onboardingText, /调减伤/)
-	assert.match(onboardingText, /导出分享/)
-	assert.match(onboardingText, /时间轴工作台/)
-	assert.equal(onboardingText.includes('统一编辑器'), false)
-	assert.equal(onboardingText.includes('新手模式'), false)
-	assert.equal(onboardingText.includes('高手模式'), false)
+	assert.equal(model.onboarding, undefined)
 })
 
 test('builds xivanalysis-style rows and positioned items for the main timeline panel', async () => {
-	const fixture = await loadFixture('../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json')
+	const fixture = await loadFixture(KANO_FIXTURE)
 	const rows = buildTimelineRows(flattenTimeline(fixture), [{name: '手动黑盾', timeMs: 90000, potency: 0}], [{name: '暗影锋', timeMs: 1200, potency: 420, output: true}])
 
 	assert.deepEqual(rows.map(row => row.id), ['boss-casts', 'boss-damage', 'player-actions', 'mitigation-actions', 'acr-simulated', 'qt-potion', 'manual-insert'])
@@ -310,6 +362,24 @@ test('builds xivanalysis-style rows and positioned items for the main timeline p
 	assert.ok(rows.find(row => row.id === 'acr-simulated').items.some(item => item.type === 'simulated-gcd'))
 	assert.ok(rows.find(row => row.id === 'manual-insert').items.some(item => item.label === '手动黑盾'))
 	assert.ok(rows.find(row => row.id === 'qt-potion').items.some(item => item.type === 'qt' || item.type === 'potion'))
+})
+
+test('simulated mitigation skills land in the mitigation row, not the ACR simulated row', () => {
+	const skillDatabase = buildSkillDatabase()
+	const simulated = buildKanoDrkSimulation(skillDatabase, {durationMs: 30000}).events
+	const rows = buildTimelineRows([], [], simulated)
+	const acrRow = rows.find(row => row.id === 'acr-simulated')
+	const mitigationRow = rows.find(row => row.id === 'mitigation-actions')
+	const forbiddenNames = ['铁壁', '暗影墙', '至黑之夜', '献奉', '弃明投暗']
+
+	assert.deepEqual(acrRow.items.filter(item => forbiddenNames.includes(item.label)).map(item => item.label), [])
+	for (const name of forbiddenNames) {
+		assert.ok(mitigationRow.items.some(item => item.label === name && item.type === 'mitigation'), `expected ${name} in mitigation row`)
+	}
+	assert.ok(mitigationRow.items.some(item => item.simulated && item.source === 'KANO ACR'))
+	assert.ok(acrRow.items.some(item => item.type === 'simulated-gcd'))
+	assert.ok(acrRow.items.some(item => item.label === '暗影使者'))
+	assert.ok(acrRow.items.some(item => item.label === '噬魂斩'))
 })
 
 test('separates mitigation and healer coverage from GCD actions while keeping DoT as output duration bars', () => {

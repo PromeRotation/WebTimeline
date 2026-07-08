@@ -3,13 +3,18 @@
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>WebTimeline 妖星编辑器</title>
-		<link rel="stylesheet" href="./styles.css">
+		<title>WebTimeline</title>
+		<meta http-equiv="refresh" content="0; url=./home.html">
+		<script>
+			const params = new URLSearchParams(window.location.search)
+			if (params.get('app') === '1') {
+				location.replace('./app.html')
+			} else {
+				location.replace('./home.html')
+			}
+		</script>
 	</head>
 	<body>
-		<div id="app">
-			<div class="boot">正在装载妖星时间轴...</div>
-		</div>
-		<script type="module" src="./app.js?v=20260707-fflogs-gcd-control"></script>
+		<a href="./home.html">WebTimeline Home</a>
 	</body>
 </html>

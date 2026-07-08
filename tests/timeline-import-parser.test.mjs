@@ -228,6 +228,36 @@ test('PR timeline import can continue past non-cast sync waits and resolve multi
 	])
 })
 
+test('resolves PR SkillCooldown waits from previously enqueued action recasts', () => {
+	const result = flattenPrTimeline({
+		Root: {
+			Type: 'serial',
+			Enabled: true,
+			Children: [
+				{Type: 'delay', Enabled: true, DelayMs: 1000},
+				{Type: 'action', Enabled: true, Actions: [{Type: 'EnqueueSkill', ActionId: 16471}]},
+				{Type: 'delay', Enabled: true, DelayMs: 3000},
+				{
+					Type: 'condition',
+					Enabled: true,
+					Mode: 'wait',
+					Conditions: [{Type: 'SkillCooldown', ActionId: 16471, Mode: '<=', Value: 0}],
+				},
+				{Type: 'action', Enabled: true, Actions: [{Type: 'EnqueueSkill', ActionId: 16471}]},
+			],
+		},
+	}, {
+		actionRecastMs: ({action}) => Number(action.ActionId) === 16471 ? 90000 : 0,
+		actionEvents: ({action}) => [{kind: 'player-action', actionId: action.ActionId}],
+	})
+
+	assert.deepEqual(result.events.filter(event => event.kind === 'player-action').map(event => [event.actionId, event.timeMs]), [
+		[16471, 1000],
+		[16471, 91000],
+	])
+	assert.equal(result.endMs, 91000)
+})
+
 test('normalizes phase-tagged PR events against imported boss phase windows', () => {
 	assert.equal(typeof timelineImportParser.normalizePhaseTaggedEvents, 'function')
 

@@ -37,6 +37,7 @@ export function flattenTimeline(timeline, skillDatabase = DEFAULT_SKILL_DATABASE
 	let currentPhase = 'P1'
 	let currentPhaseStartMs = 0
 	let cursorMs = 0
+	const actionReadyAtMs = new Map()
 
 	function pushEvent(event) {
 		events.push({
@@ -55,8 +56,11 @@ export function flattenTimeline(timeline, skillDatabase = DEFAULT_SKILL_DATABASE
 
 		const phaseMatch = /^(P\d+)/i.exec(node.Name ?? '')
 		if (phaseMatch) {
-			currentPhase = phaseMatch[1].toUpperCase()
-			currentPhaseStartMs = cursorMs
+			const nextPhase = phaseMatch[1].toUpperCase()
+			if (nextPhase !== currentPhase) {
+				currentPhase = nextPhase
+				currentPhaseStartMs = cursorMs
+			}
 		}
 
 		if (node.Type === 'delay') {
@@ -72,6 +76,10 @@ export function flattenTimeline(timeline, skillDatabase = DEFAULT_SKILL_DATABASE
 
 		if (node.Type === 'condition') {
 			const condition = first(node.Conditions) ?? node.Condition
+			const cooldownReadyMs = actionCooldownReadyMs(condition, cursorMs)
+			if (Number.isFinite(cooldownReadyMs)) {
+				cursorMs = cooldownReadyMs
+			}
 			const isCast = condition?.Type === 'CastStart'
 			const actionId = condition?.ActionId ?? condition?.Regex
 			const duration = parseCastDuration(node.Name)
@@ -108,8 +116,10 @@ export function flattenTimeline(timeline, skillDatabase = DEFAULT_SKILL_DATABASE
 					output: classification.output,
 					potency: classification.potency,
 					durationMs: classification.effectDurationMs ?? 0,
+					recastMs: Number(skillDatabase?.actionsById?.[String(actionId)]?.recastMs ?? 0),
 					count: 1,
 				})
+				recordActionCooldown(action, cursorMs)
 			}
 		}
 
@@ -120,12 +130,35 @@ export function flattenTimeline(timeline, skillDatabase = DEFAULT_SKILL_DATABASE
 
 	walk(timeline.Root)
 	return events
+
+	function recordActionCooldown(action, timeMs) {
+		const actionId = Number(action?.ActionId)
+		if (!Number.isFinite(actionId)) {
+			return
+		}
+		const recastMs = Number(skillDatabase?.actionsById?.[String(actionId)]?.recastMs ?? 0)
+		if (recastMs <= 0) {
+			return
+		}
+		actionReadyAtMs.set(actionId, Math.max(Number(actionReadyAtMs.get(actionId) ?? 0), Number(timeMs ?? 0) + recastMs))
+	}
+
+	function actionCooldownReadyMs(condition, currentMs) {
+		if (String(condition?.Type ?? '').toLowerCase() !== 'skillcooldown' || !isCooldownReadyWait(condition)) {
+			return NaN
+		}
+		const actionId = Number(condition.ActionId ?? condition.Regex)
+		if (!Number.isFinite(actionId)) {
+			return NaN
+		}
+		return Math.max(Number(currentMs ?? 0), Number(actionReadyAtMs.get(actionId) ?? currentMs))
+	}
 }
 
 export function buildModeTracks(events) {
 	const boss = events.filter(event => event.kind === 'boss-cast')
 	const player = events.filter(event => ['player-action', 'potion', 'qt-control'].includes(event.kind))
-	const mitigation = player.filter(isCoverageAction)
+	const mitigation = filterCooldownConflictingEvents(player.filter(isCoverageAction))
 	const burst = buildBurstGroups(player)
 
 	return {
@@ -173,9 +206,9 @@ export function buildTimelineRows(events, manualItems = [], simulatedItems = [])
 		.filter(event => !isCoverageAction(event))
 		.map(event => actionItem(event, 'action'))
 
-	const mitigationActions = events
+	const mitigationActions = filterCooldownConflictingEvents(events
 		.filter(event => event.kind === 'player-action')
-		.filter(isCoverageAction)
+		.filter(isCoverageAction))
 		.map(event => actionItem(event, 'action'))
 
 	const qtPotion = events
@@ -192,7 +225,9 @@ export function buildTimelineRows(events, manualItems = [], simulatedItems = [])
 		potency: item.potency ?? 0,
 	}))
 
-	const simulated = simulatedItems.map((event, index) => ({
+	const simulatedOutputItems = simulatedItems.filter(event => !isCoverageAction(event))
+	const simulatedMitigationItems = simulatedItems.filter(isCoverageAction)
+	const simulated = simulatedOutputItems.map((event, index) => ({
 		id: event.id ?? `simulated-${index}`,
 		type: event.output ? 'simulated-gcd' : 'simulated-action',
 		label: event.name,
@@ -206,12 +241,26 @@ export function buildTimelineRows(events, manualItems = [], simulatedItems = [])
 		simulated: true,
 		output: Boolean(event.output),
 	}))
+	const simulatedMitigation = simulatedMitigationItems.map((event, index) => ({
+		id: event.id ?? `simulated-mitigation-${index}`,
+		type: event.classification === 'healing' ? 'healing' : 'mitigation',
+		label: event.name,
+		startMs: event.timeMs ?? 0,
+		endMs: (event.timeMs ?? 0) + (Number(event.durationMs) > 0 ? Number(event.durationMs) : 1600),
+		timeLabel: formatClock(event.timeMs ?? 0),
+		actionId: event.actionId,
+		potency: event.potency ?? 0,
+		iconUrl: event.iconUrl ?? '',
+		source: event.source ?? 'ACR',
+		simulated: true,
+		output: Boolean(event.output),
+	}))
 
 	return [
 		{id: 'boss-casts', label: 'Boss Casts', accent: 'rose', items: bossCasts.slice(0, 72)},
 		{id: 'boss-damage', label: 'Boss Damage', accent: 'gold', items: bossDamage.slice(0, 72)},
 		{id: 'player-actions', label: 'Player Actions', accent: 'mint', items: playerActions.slice(0, 96)},
-		{id: 'mitigation-actions', label: '减伤 / 奶轴', accent: 'mint', items: mitigationActions.slice(0, 160)},
+		{id: 'mitigation-actions', label: '减伤 / 奶轴', accent: 'mint', items: [...mitigationActions, ...simulatedMitigation].slice(0, 160)},
 		{id: 'acr-simulated', label: 'ACR 模拟', accent: 'sky', items: simulated},
 		{id: 'qt-potion', label: 'QT / Potion', accent: 'violet', items: qtPotion.slice(0, 48)},
 		{id: 'manual-insert', label: 'Manual Insert', accent: 'orange', items: manual},
@@ -220,6 +269,28 @@ export function buildTimelineRows(events, manualItems = [], simulatedItems = [])
 
 function isCoverageAction(event) {
 	return event.classification === 'mitigation' || event.classification === 'healing'
+}
+
+export function filterCooldownConflictingEvents(events = []) {
+	const nextReadyByAction = new Map()
+	const result = []
+	const ordered = [...events].sort((left, right) => eventTimeMs(left) - eventTimeMs(right))
+	for (const event of ordered) {
+		const actionId = Number(event.actionId)
+		const timeMs = eventTimeMs(event)
+		const recastMs = Number(event.recastMs ?? 0)
+		if (!Number.isFinite(actionId) || !Number.isFinite(timeMs) || recastMs <= 0) {
+			result.push(event)
+			continue
+		}
+		const readyMs = Number(nextReadyByAction.get(actionId) ?? 0)
+		if (timeMs < readyMs) {
+			continue
+		}
+		nextReadyByAction.set(actionId, timeMs + recastMs)
+		result.push(event)
+	}
+	return result
 }
 
 function buildBurstGroups(playerEvents) {
@@ -266,6 +337,7 @@ function actionItem(event, type) {
 		potency: event.potency ?? 0,
 		target: event.target,
 		durationMs,
+		recastMs: event.recastMs,
 		classification: event.classification,
 		iconUrl: event.iconUrl ?? '',
 		timelineLabel: event.timelineLabel ?? '',
@@ -290,6 +362,10 @@ function actionItemType(event, fallbackType) {
 		return event.classification
 	}
 	return fallbackType
+}
+
+function eventTimeMs(event = {}) {
+	return Number(event.timeMs ?? event.startMs ?? 0)
 }
 
 function formatClock(ms = 0) {
@@ -322,4 +398,10 @@ function parseCastDuration(name = '') {
 
 function first(value) {
 	return Array.isArray(value) ? value[0] : value
+}
+
+function isCooldownReadyWait(condition = {}) {
+	const mode = String(condition.Mode ?? '<=').trim()
+	const value = Number(condition.Value ?? 0)
+	return (mode === '<=' || mode === '<') && value <= 0
 }

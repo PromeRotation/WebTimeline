@@ -29,29 +29,793 @@ import {
 	resolveBossCastConditionTimeMs,
 } from './timeline-import-parser.js'
 
+/* ============================================================
+   Lightweight i18n — three languages, no framework.
+   zh-CN is the source-of-truth default; zh-TW and ja-JP are
+   translated overlays. Strings fall back to the zh-CN entry,
+   then to the provided fallback, then to the key itself.
+   ============================================================ */
+const SUPPORTED_LANGUAGES = ['zh-CN', 'zh-TW', 'ja-JP']
+const LANGUAGE_STORAGE_KEY = 'webtimelineLanguage'
+const LANGUAGE_LABELS = {
+	'zh-CN': '简中',
+	'zh-TW': '繁中',
+	'ja-JP': '日本語',
+}
+
+const I18N = {
+	'zh-CN': {
+		'nav.timeline': '时间轴编辑',
+		'nav.tools': '工具',
+		'nav.teamMode': '8人团队模式',
+		'brand.subtitle': '妖星编辑器',
+		'label.mode': '模式',
+		'label.job': '职业',
+		'label.acr': 'ACR',
+		'label.target': '目标',
+		'mode.browse': '浏览模式',
+		'mode.edit': '编辑模式',
+		'action.import': '导入',
+		'action.export': '导出',
+		'action.insert': '插入',
+		'action.close': '关闭',
+		'action.trace': '追踪',
+		'action.track': '追踪',
+		'action.tracked': '已追踪',
+		'action.located': '已定位',
+		'action.browse': '浏览',
+		'action.insertBurst': '插入爆发',
+		'action.insertPotion': '插入爆发药',
+		'action.insertQt': '插入QT',
+		'action.addFocus': '+ 关注技能',
+		'action.removeFocus': '取消关注',
+		'action.duplicate': '复制',
+		'action.delete': '删除',
+		'status.current': '当前选择',
+		'status.unspecified': '未指定',
+		'status.notConnected': '未接入',
+		'label.jobColon': '职业：',
+		'label.acrColon': 'ACR：',
+		'rail.timeline': '时间轴',
+		'rail.tools': '工具',
+		'rail.about': '关于',
+		'rail.output': '输出轴',
+		'rail.mitigation': '减伤 / 奶轴',
+		'rail.burst': '爆发',
+		'rail.acrSim': 'ACR 模拟',
+		'rail.focusAdd': '+ 关注技能',
+		'legend.boss': 'Boss',
+		'legend.output': '输出',
+		'legend.mitigation': '减伤',
+		'legend.burst': '爆发',
+		'phase.all': '全部',
+		'sim.hide': '隐藏 ACR 模拟',
+		'sim.show': '显示 ACR 模拟',
+		'sim.outputOn': '输出轴包含 ACR 模拟技能',
+		'sim.outputOff': '输出轴仅显示导入 / 手动技能',
+		'overview.title': '整页总览',
+		'overview.boss': 'Boss 读条',
+		'overview.mitigation': '减伤 / 奶轴',
+		'overview.damage': '输出轴',
+		'overview.potion': '爆发药轴',
+		'overview.opener': '起手',
+		'overview.qt': 'QT',
+		'overview.burst': '爆发',
+		'overview.ariaToggles': '总览显示项',
+		'category.all': '全部',
+		'category.output': '输出',
+		'category.mitigation': '减伤',
+		'category.potion': '爆发药',
+		'category.qt': 'QT',
+		'category.burst': '爆发',
+		'insert.title': '插入技能',
+		'insert.hint': '拖入时间轴或点击卡片立即生成手动技能',
+		'insert.floatTitle': '拖动移动，点击打开编程模式面板',
+		'insert.skillIdPlaceholder': '技能 ID',
+		'burst.title': '爆发',
+		'burst.hint': '拖到时间轴或点击插入 60 / 120 爆发模板',
+		'burst.120': '120 爆发',
+		'burst.60': '60 爆发',
+		'potion.title': '爆发药',
+		'potion.hint': '先选属性，再在下方选择等级；插入后作为 30 秒爆发药窗口，冷却按 4:30 处理',
+		'potion.attributeAria': '爆发药属性',
+		'potion.selectSuffix': '药',
+		'potion.role.strength': '力量系',
+		'potion.role.dexterity': '敏捷系',
+		'potion.role.intelligence': '法系输出',
+		'potion.role.mind': '治疗系',
+		'potion.attr.strength': '刚力',
+		'potion.attr.dexterity': '巧力',
+		'potion.attr.intelligence': '智力',
+		'potion.attr.mind': '意力',
+		'qt.note': '点击左侧 QT 只会切换本次草稿；右侧确认要写入的逻辑，没问题后再插入。',
+		'qt.draftTitle': '本次插入逻辑',
+		'qt.draftChanges': '项变更',
+		'qt.on': '开启',
+		'qt.off': '关闭',
+		'detail.panelNotFound': '没有找到这个栏目。',
+		'detail.noData': '当前 P / 当前过滤条件下暂无数据',
+		'detail.bossLocked': 'Boss 技能默认锁定',
+		'detail.locateTitle': '跳转到时间轴上的这个技能',
+		'detail.targetRequired': '必须选择目标',
+		'target.placeholder': '请选择',
+		'target.boss': 'Boss / Target',
+		'target.self': '自己 / Self',
+		'target.targetOfTarget': '目标的目标',
+		'target.party': '队友',
+		'manual.title': '手动轴编辑',
+		'manual.hintEdit': '可以改时间、微调、复制或删除用户手动技能',
+		'manual.hintBrowse': '浏览模式下锁定，切到编辑模式后可调整',
+		'time.globalSec': '全局秒',
+		'time.phaseSec': '秒',
+		'acr.title': 'ACR 数据库',
+		'acr.dockTitle': 'ACR 数据库',
+		'acr.packages': 'ACR 包列表',
+		'acr.field.status': '支持状态：',
+		'acr.field.author': '作者：',
+		'acr.field.source': '数据来源：',
+		'acr.stat.jobs': '职业',
+		'acr.stat.packages': 'ACR 包',
+		'acr.stat.supported': '已支持',
+		'acr.stat.waiting': '等待接入',
+		'acr.stat.unsupported': '未支持',
+		'acr.dataLabel': 'ACR 数据',
+		'acr.status.supported': '已支持',
+		'acr.status.waiting': '等待接入',
+		'acr.status.unsupported': '未支持',
+		'about.title': '关于',
+		'about.eyebrow': '项目信息',
+		'about.projectName': '项目名称',
+		'about.intro': '简介',
+		'about.introValue': 'FF14 时间轴编辑器 / ACR 辅助工具',
+		'about.author': '作者',
+		'about.version': '版本',
+		'about.updatedAt': '更新时间',
+		'about.supportedJobs': '支持职业',
+		'about.supportedJobsValue': '已支持 {supported} / 共 {total} 个职业',
+		'about.acrSource': 'ACR 数据源',
+		'about.acrSourceValue': '2026-07-09',
+		'about.fflogs': 'FFLogs 对比',
+		'about.localImport': '本地时间轴导入',
+		'about.port': '当前运行端口',
+		'about.supported': '支持',
+		'role.tank': 'T',
+		'role.healer': 'H',
+		'role.dps': 'DPS',
+		'role.ranged': '远敏',
+		'role.caster': '法系',
+		'role.melee': '近战',
+		'focus.eyebrow': '技能追踪器',
+		'focus.help': '追踪当前职业的任意技能，显示出现次数、时间点和来源。',
+		'focus.searchPlaceholder': '搜索技能名或技能 ID',
+		'focus.currentJob': '当前职业技能',
+		'focus.other': '其他技能',
+		'focus.otherDesc': '其他职业、导入轴里出现过的技能，默认收起',
+		'focus.universal': '通用',
+		'focus.countSuffix': '个',
+		'focus.occurrences': '本轴',
+		'focus.timesSuffix': '次',
+		'focus.trackedCount': '已追踪 {n} 个技能',
+		'focus.emptyHint': '点击选择当前职业技能',
+		'focus.skillId': '技能',
+		'tool.eyebrow': '工具',
+		'tool.title': '模拟估值 / FFLogs 对比',
+		'tool.statusPill': '妖星首版',
+		'tool.simEyebrow': '伤害模拟计算',
+		'tool.simTitle': '分 P 与整体估值',
+		'tool.luckAverage': '平均',
+		'tool.luckLucky': '好运直暴',
+		'tool.luckLow': '保守',
+		'tool.critRate': '暴击概率',
+		'tool.directRate': '直击概率',
+		'tool.simHint': '可与当前 ACT log、FFLogs 榜一轴和导入轴做模拟对比。',
+		'fflogs.eyebrow': 'FFLogs 对比模式',
+		'fflogs.title': '当前轴 vs 日志实战轴',
+		'fflogs.statusParsed': '已解析',
+		'fflogs.statusPending': '待导入',
+		'fflogs.placeholder': '粘贴 FFLogs report 链接',
+		'fflogs.parse': '解析 FFLogs',
+		'fflogs.parsing': '解析中',
+		'fflogs.hint': '导入链接后会自动匹配当前职业，解析本地缓存事件，并对比伤害、技能数、GCD 利用率和治疗量。',
+		'fflogs.actor': '角色',
+		'fflogs.unknownJob': '未知',
+		'fflogs.metric.damage': '伤害',
+		'fflogs.metric.skills': '全部技能数',
+		'fflogs.metric.gcd': 'GCD 利用率',
+		'fflogs.metric.healing': '治疗量',
+		'fflogs.sim': '模拟',
+		'fflogs.log': '日志',
+		'fflogs.section.phaseDamage': '分 P 伤害',
+		'fflogs.section.skillDiff': '技能数量差异',
+		'fflogs.tableHeader.phase': 'P',
+		'fflogs.tableHeader.simulated': '模拟',
+		'fflogs.tableHeader.log': '日志',
+		'fflogs.tableHeader.delta': '差值',
+		'fflogs.tableHeader.skill': '技能',
+		'fflogs.gcdLabel': '模拟利用率',
+		'fflogs.applyLog': '套用日志',
+		'fflogs.reset': '重置 100%',
+		'fflogs.gcdInfo': '原始模拟',
+		'fflogs.gcdTargetDiff': '目标差',
+		'fflogs.metric.actions': '动作',
+		'fflogs.metric.autoAttack': '自动攻击',
+		'boot.loading': '正在装载妖星时间轴...',
+		'empty.noData': '暂无数据',
+		'empty.noSkillInCategory': '这个分类暂无技能',
+		'empty.noBurst': '暂无可插入的爆发',
+		'empty.noPotion': '暂无可插入的爆发药',
+		'empty.noQt': '暂无 QT',
+		'empty.noQtState': '暂时没有解析到 QT 状态',
+		'empty.noQtBurst': '当前 P / 当前过滤条件下暂无 QT 节点',
+		'empty.noBurstData': '当前 P / 当前过滤条件下暂无爆发数据',
+		'empty.qtDraftEmpty': '先点击左侧 QT 开关',
+		'empty.noManual': '当前分类还没有手动技能，可先从上方复制或从技能列拖入。',
+		'empty.noSkill': '没有找到技能',
+		'unit.items': '项',
+		'hint.trackSkill': '点击追踪这个技能的出现位置',
+		'hint.traceSkill': '点击在时间轴上定位并高亮这个技能，不会新增关注技能',
+		'hint.noTrackableId': '暂无可追踪 ID',
+		'hint.insertToQueue': '插入到手动队列',
+		'hint.dragInsertBurst': '点击插入这个爆发中可识别的职业技能，也可以拖入时间轴',
+		'source.manual': '用户手动',
+		'source.acr': 'ACR 自动',
+		'source.timeline': '导入时间轴',
+		'meta.originalAxis': '原轴：',
+		'meta.cdAdjusted': '队列已顺延',
+		'meta.queueCd': '队列CD调整',
+		'acr.lockedHint': 'ACR 自动技能已锁定，可关注查看，后续高手模式再允许复制为手动技能。',
+		'edit.lockedHint': '切到编辑模式后可拖入时间轴',
+		'nav.fflogs': 'FFLogs 对比',
+		'nav.simulation': '伤害模拟',
+		'aria.editSection': '编辑分区',
+		'aria.editorMode': '编辑器模式',
+		'detail.qtControl': 'QT 控制',
+		'category.healing': '治疗',
+		'hint.dragToTimeline': '拖入时间轴',
+		'insert.panelHandle': '拖动移动插入技能面板',
+		'acr.lockedShort': 'ACR 锁定',
+		'hint.draggableTime': '可拖动调整时间',
+	},
+	'zh-TW': {
+		'nav.timeline': '時間軸編輯',
+		'nav.tools': '工具',
+		'nav.teamMode': '8人團隊模式',
+		'brand.subtitle': '妖星編輯器',
+		'label.mode': '模式',
+		'label.job': '職業',
+		'label.acr': 'ACR',
+		'label.target': '目標',
+		'mode.browse': '瀏覽模式',
+		'mode.edit': '編輯模式',
+		'action.import': '匯入',
+		'action.export': '匯出',
+		'action.insert': '插入',
+		'action.close': '關閉',
+		'action.trace': '追蹤',
+		'action.track': '追蹤',
+		'action.tracked': '已追蹤',
+		'action.located': '已定位',
+		'action.browse': '瀏覽',
+		'action.insertBurst': '插入爆發',
+		'action.insertPotion': '插入爆發藥',
+		'action.insertQt': '插入QT',
+		'action.addFocus': '+ 關注技能',
+		'action.removeFocus': '取消關注',
+		'action.duplicate': '複製',
+		'action.delete': '刪除',
+		'status.current': '目前選擇',
+		'status.unspecified': '未指定',
+		'status.notConnected': '未接入',
+		'label.jobColon': '職業：',
+		'label.acrColon': 'ACR：',
+		'rail.timeline': '時間軸',
+		'rail.tools': '工具',
+		'rail.about': '關於',
+		'rail.output': '輸出軸',
+		'rail.mitigation': '減傷 / 奶軸',
+		'rail.burst': '爆發',
+		'rail.acrSim': 'ACR 模擬',
+		'rail.focusAdd': '+ 關注技能',
+		'legend.boss': 'Boss',
+		'legend.output': '輸出',
+		'legend.mitigation': '減傷',
+		'legend.burst': '爆發',
+		'phase.all': '全部',
+		'sim.hide': '隱藏 ACR 模擬',
+		'sim.show': '顯示 ACR 模擬',
+		'sim.outputOn': '輸出軸包含 ACR 模擬技能',
+		'sim.outputOff': '輸出軸僅顯示匯入 / 手動技能',
+		'overview.title': '整頁總覽',
+		'overview.boss': 'Boss 讀條',
+		'overview.mitigation': '減傷 / 奶軸',
+		'overview.damage': '輸出軸',
+		'overview.potion': '爆發藥軸',
+		'overview.opener': '起手',
+		'overview.qt': 'QT',
+		'overview.burst': '爆發',
+		'overview.ariaToggles': '總覽顯示項',
+		'category.all': '全部',
+		'category.output': '輸出',
+		'category.mitigation': '減傷',
+		'category.potion': '爆發藥',
+		'category.qt': 'QT',
+		'category.burst': '爆發',
+		'insert.title': '插入技能',
+		'insert.hint': '拖入時間軸或點擊卡片立即產生手動技能',
+		'insert.floatTitle': '拖動移動，點擊打開程式設計模式面板',
+		'insert.skillIdPlaceholder': '技能 ID',
+		'burst.title': '爆發',
+		'burst.hint': '拖到時間軸或點擊插入 60 / 120 爆發範本',
+		'burst.120': '120 爆發',
+		'burst.60': '60 爆發',
+		'potion.title': '爆發藥',
+		'potion.hint': '先選屬性，再在下方選擇等級；插入後作為 30 秒爆發藥窗口，冷卻按 4:30 處理',
+		'potion.attributeAria': '爆發藥屬性',
+		'potion.selectSuffix': '藥',
+		'potion.role.strength': '力量系',
+		'potion.role.dexterity': '敏捷系',
+		'potion.role.intelligence': '法系輸出',
+		'potion.role.mind': '治療系',
+		'potion.attr.strength': '剛力',
+		'potion.attr.dexterity': '巧力',
+		'potion.attr.intelligence': '智力',
+		'potion.attr.mind': '意力',
+		'qt.note': '點擊左側 QT 只會切換本次草稿；右側確認要寫入的邏輯，沒問題後再插入。',
+		'qt.draftTitle': '本次插入邏輯',
+		'qt.draftChanges': '項變更',
+		'qt.on': '開啟',
+		'qt.off': '關閉',
+		'detail.panelNotFound': '沒有找到這個欄目。',
+		'detail.noData': '目前 P / 目前過濾條件下暫無資料',
+		'detail.bossLocked': 'Boss 技能預設鎖定',
+		'detail.locateTitle': '跳轉到時間軸上的這個技能',
+		'detail.targetRequired': '必須選擇目標',
+		'target.placeholder': '請選擇',
+		'target.boss': 'Boss / Target',
+		'target.self': '自己 / Self',
+		'target.targetOfTarget': '目標的目標',
+		'target.party': '隊友',
+		'manual.title': '手動軸編輯',
+		'manual.hintEdit': '可以改時間、微調、複製或刪除使用者手動技能',
+		'manual.hintBrowse': '瀏覽模式下鎖定，切到編輯模式後可調整',
+		'time.globalSec': '全域秒',
+		'time.phaseSec': '秒',
+		'acr.title': 'ACR 資料庫',
+		'acr.dockTitle': 'ACR 資料庫',
+		'acr.packages': 'ACR 包列表',
+		'acr.field.status': '支援狀態：',
+		'acr.field.author': '作者：',
+		'acr.field.source': '資料來源：',
+		'acr.stat.jobs': '職業',
+		'acr.stat.packages': 'ACR 包',
+		'acr.stat.supported': '已支援',
+		'acr.stat.waiting': '等待接入',
+		'acr.stat.unsupported': '未支援',
+		'acr.dataLabel': 'ACR 資料',
+		'acr.status.supported': '已支援',
+		'acr.status.waiting': '等待接入',
+		'acr.status.unsupported': '未支援',
+		'about.title': '關於',
+		'about.eyebrow': '專案資訊',
+		'about.projectName': '專案名稱',
+		'about.intro': '簡介',
+		'about.introValue': 'FF14 時間軸編輯器 / ACR 輔助工具',
+		'about.author': '作者',
+		'about.version': '版本',
+		'about.updatedAt': '更新時間',
+		'about.supportedJobs': '支援職業',
+		'about.supportedJobsValue': '已支援 {supported} / 共 {total} 個職業',
+		'about.acrSource': 'ACR 資料來源',
+		'about.acrSourceValue': '2026-07-09',
+		'about.fflogs': 'FFLogs 對比',
+		'about.localImport': '本地時間軸匯入',
+		'about.port': '目前執行連接埠',
+		'about.supported': '支援',
+		'role.tank': 'T',
+		'role.healer': 'H',
+		'role.dps': 'DPS',
+		'role.ranged': '遠敏',
+		'role.caster': '法系',
+		'role.melee': '近戰',
+		'focus.eyebrow': '技能追蹤器',
+		'focus.help': '追蹤目前職業的任意技能，顯示出現次數、時間點和來源。',
+		'focus.searchPlaceholder': '搜尋技能名或技能 ID',
+		'focus.currentJob': '目前職業技能',
+		'focus.other': '其他技能',
+		'focus.otherDesc': '其他職業、匯入軸裡出現過的技能，預設收起',
+		'focus.universal': '通用',
+		'focus.countSuffix': '個',
+		'focus.occurrences': '本軸',
+		'focus.timesSuffix': '次',
+		'focus.trackedCount': '已追蹤 {n} 個技能',
+		'focus.emptyHint': '點擊選擇目前職業技能',
+		'focus.skillId': '技能',
+		'tool.eyebrow': '工具',
+		'tool.title': '模擬估值 / FFLogs 對比',
+		'tool.statusPill': '妖星首版',
+		'tool.simEyebrow': '傷害模擬計算',
+		'tool.simTitle': '分 P 與整體估值',
+		'tool.luckAverage': '平均',
+		'tool.luckLucky': '好運直暴',
+		'tool.luckLow': '保守',
+		'tool.critRate': '暴擊機率',
+		'tool.directRate': '直擊機率',
+		'tool.simHint': '可與目前 ACT log、FFLogs 榜一軸和匯入軸做模擬對比。',
+		'fflogs.eyebrow': 'FFLogs 對比模式',
+		'fflogs.title': '目前軸 vs 日誌實戰軸',
+		'fflogs.statusParsed': '已解析',
+		'fflogs.statusPending': '待匯入',
+		'fflogs.placeholder': '貼上 FFLogs report 連結',
+		'fflogs.parse': '解析 FFLogs',
+		'fflogs.parsing': '解析中',
+		'fflogs.hint': '匯入連結後會自動匹配目前職業，解析本地快取事件，並對比傷害、技能數、GCD 利用率和治療量。',
+		'fflogs.actor': '角色',
+		'fflogs.unknownJob': '未知',
+		'fflogs.metric.damage': '傷害',
+		'fflogs.metric.skills': '全部技能數',
+		'fflogs.metric.gcd': 'GCD 利用率',
+		'fflogs.metric.healing': '治療量',
+		'fflogs.sim': '模擬',
+		'fflogs.log': '日誌',
+		'fflogs.section.phaseDamage': '分 P 傷害',
+		'fflogs.section.skillDiff': '技能數量差異',
+		'fflogs.tableHeader.phase': 'P',
+		'fflogs.tableHeader.simulated': '模擬',
+		'fflogs.tableHeader.log': '日誌',
+		'fflogs.tableHeader.delta': '差值',
+		'fflogs.tableHeader.skill': '技能',
+		'fflogs.gcdLabel': '模擬利用率',
+		'fflogs.applyLog': '套用日誌',
+		'fflogs.reset': '重置 100%',
+		'fflogs.gcdInfo': '原始模擬',
+		'fflogs.gcdTargetDiff': '目標差',
+		'fflogs.metric.actions': '動作',
+		'fflogs.metric.autoAttack': '自動攻擊',
+		'boot.loading': '正在載入妖星時間軸...',
+		'empty.noData': '暫無資料',
+		'empty.noSkillInCategory': '這個分類暫無技能',
+		'empty.noBurst': '暫無可插入的爆發',
+		'empty.noPotion': '暫無可插入的爆發藥',
+		'empty.noQt': '暫無 QT',
+		'empty.noQtState': '暫時沒有解析到 QT 狀態',
+		'empty.noQtBurst': '目前 P / 目前過濾條件下暫無 QT 節點',
+		'empty.noBurstData': '目前 P / 目前過濾條件下暫無爆發資料',
+		'empty.qtDraftEmpty': '先點擊左側 QT 開關',
+		'empty.noManual': '目前分類還沒有手動技能，可先從上方複製或從技能列拖入。',
+		'empty.noSkill': '沒有找到技能',
+		'unit.items': '項',
+		'hint.trackSkill': '點擊追蹤這個技能的出現位置',
+		'hint.traceSkill': '點擊在時間軸上定位並高亮這個技能，不會新增關注技能',
+		'hint.noTrackableId': '暫無可追蹤 ID',
+		'hint.insertToQueue': '插入手動佇列',
+		'hint.dragInsertBurst': '點擊插入這個爆發中可識別的職業技能，也可以拖入時間軸',
+		'source.manual': '使用者手動',
+		'source.acr': 'ACR 自動',
+		'source.timeline': '匯入時間軸',
+		'meta.originalAxis': '原軸：',
+		'meta.cdAdjusted': '佇列已順延',
+		'meta.queueCd': '佇列CD調整',
+		'acr.lockedHint': 'ACR 自動技能已鎖定，可關注查看，後續高手模式再允許複製為手動技能。',
+		'edit.lockedHint': '切到編輯模式後可拖入時間軸',
+		'nav.fflogs': 'FFLogs 對比',
+		'nav.simulation': '傷害模擬',
+		'aria.editSection': '編輯分區',
+		'aria.editorMode': '編輯器模式',
+		'detail.qtControl': 'QT 控制',
+		'category.healing': '治療',
+		'hint.dragToTimeline': '拖入時間軸',
+		'insert.panelHandle': '拖動移動插入技能面板',
+		'acr.lockedShort': 'ACR 鎖定',
+		'hint.draggableTime': '可拖動調整時間',
+	},
+	'ja-JP': {
+		'nav.timeline': 'タイムライン編集',
+		'nav.tools': 'ツール',
+		'nav.teamMode': '8人チームモード',
+		'brand.subtitle': '妖星エディタ',
+		'label.mode': 'モード',
+		'label.job': 'ジョブ',
+		'label.acr': 'ACR',
+		'label.target': 'ターゲット',
+		'mode.browse': '閲覧モード',
+		'mode.edit': '編集モード',
+		'action.import': 'インポート',
+		'action.export': 'エクスポート',
+		'action.insert': '挿入',
+		'action.close': '閉じる',
+		'action.trace': '追跡',
+		'action.track': '追跡',
+		'action.tracked': '追跡済み',
+		'action.located': '位置済み',
+		'action.browse': '閲覧',
+		'action.insertBurst': 'バースト挿入',
+		'action.insertPotion': '薬挿入',
+		'action.insertQt': 'QT挿入',
+		'action.addFocus': '+ スキル追跡',
+		'action.removeFocus': '追跡解除',
+		'action.duplicate': '複製',
+		'action.delete': '削除',
+		'status.current': '現在の選択',
+		'status.unspecified': '未指定',
+		'status.notConnected': '未接続',
+		'label.jobColon': 'ジョブ：',
+		'label.acrColon': 'ACR：',
+		'rail.timeline': 'タイムライン',
+		'rail.tools': 'ツール',
+		'rail.about': '概要',
+		'rail.output': '出力軸',
+		'rail.mitigation': '軽減 / ヒール軸',
+		'rail.burst': 'バースト',
+		'rail.acrSim': 'ACR シミュ',
+		'rail.focusAdd': '+ フォックスキル',
+		'legend.boss': 'Boss',
+		'legend.output': '出力',
+		'legend.mitigation': '軽減',
+		'legend.burst': 'バースト',
+		'phase.all': '全部',
+		'sim.hide': 'ACR シミュを隠す',
+		'sim.show': 'ACR シミュを表示',
+		'sim.outputOn': '出力軸に ACR シミュスキルを含む',
+		'sim.outputOff': '出力軸はインポート / 手動スキルのみ',
+		'overview.title': '全体概覧',
+		'overview.boss': 'Boss 詠唱',
+		'overview.mitigation': '軽減 / ヒール軸',
+		'overview.damage': '出力軸',
+		'overview.potion': '薬軸',
+		'overview.opener': '開幕',
+		'overview.qt': 'QT',
+		'overview.burst': 'バースト',
+		'overview.ariaToggles': '概覧表示項目',
+		'category.all': '全部',
+		'category.output': '出力',
+		'category.mitigation': '軽減',
+		'category.potion': '薬',
+		'category.qt': 'QT',
+		'category.burst': 'バースト',
+		'insert.title': 'スキル挿入',
+		'insert.hint': 'タイムラインにドラッグ、またはカードをクリックして手動スキルを生成',
+		'insert.floatTitle': 'ドラッグで移動、クリックでプログラミングモードパネルを開く',
+		'insert.skillIdPlaceholder': 'スキル ID',
+		'burst.title': 'バースト',
+		'burst.hint': 'タイムラインにドラッグ、またはクリックで 60 / 120 バーストテンプレートを挿入',
+		'burst.120': '120 バースト',
+		'burst.60': '60 バースト',
+		'potion.title': '薬',
+		'potion.hint': '先に属性を選び、下で等级を選択。挿入後は 30 秒の薬ウィンドウ、リキャストは 4:30 扱い',
+		'potion.attributeAria': '薬の属性',
+		'potion.selectSuffix': '薬',
+		'potion.role.strength': '力系',
+		'potion.role.dexterity': '敏捷系',
+		'potion.role.intelligence': '魔法火力',
+		'potion.role.mind': 'ヒール系',
+		'potion.attr.strength': '剛力',
+		'potion.attr.dexterity': '巧力',
+		'potion.attr.intelligence': '智力',
+		'potion.attr.mind': '意力',
+		'qt.note': '左の QT をクリックすると今回のドラフトだけ切替。右側で書き込むロジックを確認し、問題なければ挿入。',
+		'qt.draftTitle': '今回の挿入ロジック',
+		'qt.draftChanges': '件の変更',
+		'qt.on': 'オン',
+		'qt.off': 'オフ',
+		'detail.panelNotFound': 'この欄は見つかりません。',
+		'detail.noData': '現在の P / フィルタ条件下にデータなし',
+		'detail.bossLocked': 'Boss スキルは既定でロック',
+		'detail.locateTitle': 'タイムライン上のこのスキルへ移動',
+		'detail.targetRequired': 'ターゲットを選択必須',
+		'target.placeholder': '選択してください',
+		'target.boss': 'Boss / Target',
+		'target.self': '自分 / Self',
+		'target.targetOfTarget': 'ターゲットのターゲット',
+		'target.party': 'PT',
+		'manual.title': '手動軸編集',
+		'manual.hintEdit': '時間変更・微調整・複製・削除が可能',
+		'manual.hintBrowse': '閲覧モードではロック、編集モードに切替後調整可',
+		'time.globalSec': '全体秒',
+		'time.phaseSec': '秒',
+		'acr.title': 'ACR データベース',
+		'acr.dockTitle': 'ACR データベース',
+		'acr.packages': 'ACR パッケージ一覧',
+		'acr.field.status': 'サポート状態：',
+		'acr.field.author': '作者：',
+		'acr.field.source': 'データ元：',
+		'acr.stat.jobs': 'ジョブ',
+		'acr.stat.packages': 'ACR パッケージ',
+		'acr.stat.supported': 'サポート済',
+		'acr.stat.waiting': '接入待ち',
+		'acr.stat.unsupported': '未サポート',
+		'acr.dataLabel': 'ACR データ',
+		'acr.status.supported': 'サポート済',
+		'acr.status.waiting': '接入待ち',
+		'acr.status.unsupported': '未サポート',
+		'about.title': '概要',
+		'about.eyebrow': 'プロジェクト情報',
+		'about.projectName': 'プロジェクト名',
+		'about.intro': '概要',
+		'about.introValue': 'FF14 タイムラインエディタ / ACR 補助ツール',
+		'about.author': '作者',
+		'about.version': 'バージョン',
+		'about.updatedAt': '更新日時',
+		'about.supportedJobs': 'サポートジョブ',
+		'about.supportedJobsValue': 'サポート済 {supported} / 全 {total} ジョブ',
+		'about.acrSource': 'ACR データ元',
+		'about.acrSourceValue': '2026-07-09',
+		'about.fflogs': 'FFLogs 対比',
+		'about.localImport': 'ローカル時間軸インポート',
+		'about.port': '実行ポート',
+		'about.supported': 'サポート',
+		'role.tank': 'T',
+		'role.healer': 'H',
+		'role.dps': 'DPS',
+		'role.ranged': '遠隔',
+		'role.caster': '魔法',
+		'role.melee': '近接',
+		'focus.eyebrow': 'スキル追跡',
+		'focus.help': '現在のジョブの任意スキルを追跡し、出現回数・時間・出典を表示。',
+		'focus.searchPlaceholder': 'スキル名またはスキル ID を検索',
+		'focus.currentJob': '現在のジョブスキル',
+		'focus.other': 'その他のスキル',
+		'focus.otherDesc': '他ジョブ・インポート軸に出現したスキル、既定で折りたたみ',
+		'focus.universal': '汎用',
+		'focus.countSuffix': '件',
+		'focus.occurrences': 'この軸',
+		'focus.timesSuffix': '回',
+		'focus.trackedCount': '{n} 件のスキルを追跡中',
+		'focus.emptyHint': 'クリックして現在のジョブスキルを選択',
+		'focus.skillId': 'スキル',
+		'tool.eyebrow': 'ツール',
+		'tool.title': 'シミュ估值 / FFLogs 対比',
+		'tool.statusPill': '妖星初版',
+		'tool.simEyebrow': 'ダメージシミュ計算',
+		'tool.simTitle': 'P別 / 全体估值',
+		'tool.luckAverage': '平均',
+		'tool.luckLucky': '好運直暴',
+		'tool.luckLow': '控えめ',
+		'tool.critRate': 'クリ率',
+		'tool.directRate': '直撃率',
+		'tool.simHint': '現在の ACT log、FFLogs トップ軸、インポート軸とシミュ対比可能。',
+		'fflogs.eyebrow': 'FFLogs 対比モード',
+		'fflogs.title': '現在の軸 vs ログ実戦軸',
+		'fflogs.statusParsed': '解析済',
+		'fflogs.statusPending': '未インポート',
+		'fflogs.placeholder': 'FFLogs report リンクを貼り付け',
+		'fflogs.parse': 'FFLogs を解析',
+		'fflogs.parsing': '解析中',
+		'fflogs.hint': 'リンクをインポートすると現在のジョブを自動マッチし、ローカルキャッシュイベントを解析、ダメージ・スキル数・GCD 利用率・ヒール量を対比します。',
+		'fflogs.actor': 'キャラ',
+		'fflogs.unknownJob': '不明',
+		'fflogs.metric.damage': 'ダメージ',
+		'fflogs.metric.skills': '全スキル数',
+		'fflogs.metric.gcd': 'GCD 利用率',
+		'fflogs.metric.healing': 'ヒール量',
+		'fflogs.sim': 'シミュ',
+		'fflogs.log': 'ログ',
+		'fflogs.section.phaseDamage': 'P別ダメージ',
+		'fflogs.section.skillDiff': 'スキル数の差異',
+		'fflogs.tableHeader.phase': 'P',
+		'fflogs.tableHeader.simulated': 'シミュ',
+		'fflogs.tableHeader.log': 'ログ',
+		'fflogs.tableHeader.delta': '差分',
+		'fflogs.tableHeader.skill': 'スキル',
+		'fflogs.gcdLabel': 'シミュ利用率',
+		'fflogs.applyLog': 'ログを適用',
+		'fflogs.reset': 'リセット 100%',
+		'fflogs.gcdInfo': '生シミュ',
+		'fflogs.gcdTargetDiff': '目標差',
+		'fflogs.metric.actions': 'アクション',
+		'fflogs.metric.autoAttack': 'オートアタック',
+		'boot.loading': '妖星タイムラインを読み込み中...',
+		'empty.noData': 'データなし',
+		'empty.noSkillInCategory': 'この分類にスキルなし',
+		'empty.noBurst': '挿入可能なバーストなし',
+		'empty.noPotion': '挿入可能な薬なし',
+		'empty.noQt': 'QT なし',
+		'empty.noQtState': 'QT 状態を解析できませんでした',
+		'empty.noQtBurst': '現在の P / フィルタ条件下に QT ノードなし',
+		'empty.noBurstData': '現在の P / フィルタ条件下にバーストデータなし',
+		'empty.qtDraftEmpty': '左の QT スイッチをクリック',
+		'empty.noManual': 'この分類に手動スキルなし。上から複製、またはスキル列からドラッグ。',
+		'empty.noSkill': 'スキルが見つかりません',
+		'unit.items': '件',
+		'hint.trackSkill': 'クリックでこのスキルの出現位置を追跡',
+		'hint.traceSkill': 'クリックでタイムライン上のこのスキルを位置確認・ハイライト（追跡スキルは追加しない）',
+		'hint.noTrackableId': '追跡可能な ID なし',
+		'hint.insertToQueue': '手動キューに挿入',
+		'hint.dragInsertBurst': 'クリックでこのバーストの職業スキルを挿入、タイムラインにドラッグも可',
+		'source.manual': 'ユーザー手動',
+		'source.acr': 'ACR 自動',
+		'source.timeline': 'インポート時間軸',
+		'meta.originalAxis': '原軸：',
+		'meta.cdAdjusted': 'キュー順延済',
+		'meta.queueCd': 'キューCD調整',
+		'acr.lockedHint': 'ACR 自動スキルはロック済。追跡して確認可、上位モードで手動スキルとして複製可能になります。',
+		'edit.lockedHint': '編集モードに切替後タイムラインにドラッグ可',
+		'nav.fflogs': 'FFLogs 対比',
+		'nav.simulation': 'ダメージシミュ',
+		'aria.editSection': '編集セクション',
+		'aria.editorMode': 'エディタモード',
+		'detail.qtControl': 'QT 操作',
+		'category.healing': 'ヒール',
+		'hint.dragToTimeline': 'タイムラインにドラッグ',
+		'insert.panelHandle': 'ドラッグでスキル挿入パネルを移動',
+		'acr.lockedShort': 'ACR ロック',
+		'hint.draggableTime': 'ドラッグで時間調整可',
+	},
+}
+
+function detectLanguage() {
+	const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY)
+	if (stored && SUPPORTED_LANGUAGES.includes(stored)) {
+		return stored
+	}
+	return 'zh-CN'
+}
+
+function t(key, fallback = '') {
+	const lang = state.language ?? 'zh-CN'
+	const value = I18N[lang]?.[key] ?? I18N['zh-CN']?.[key]
+	return value != null && value !== '' ? value : (fallback || key)
+}
+
+function setLanguage(lang) {
+	const next = SUPPORTED_LANGUAGES.includes(lang) ? lang : 'zh-CN'
+	state.language = next
+	localStorage.setItem(LANGUAGE_STORAGE_KEY, next)
+	document.documentElement.lang = next
+	render()
+}
+
+function renderLanguageSwitcher() {
+	const current = state.language ?? 'zh-CN'
+	return `
+		<div class="lang-switcher" role="group" aria-label="Language">
+			${SUPPORTED_LANGUAGES.map(lang => `<button type="button" class="lang-switcher-button ${lang === current ? 'active' : ''}" data-lang="${lang}" aria-pressed="${lang === current ? 'true' : 'false'}">${LANGUAGE_LABELS[lang]}</button>`).join('')}
+		</div>
+	`
+}
+
+/* App metadata — keep APP_VERSION in sync with package.json. */
+const APP_VERSION = 'v0.1.0'
+const APP_AUTHOR = 'pr大团体'
+const APP_UPDATED_AT = '2026-07-09'
+const APP_PORT = '4173'
+const INFO_ICON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+
 const state = {
 	model: null,
+	language: detectLanguage(),
 	panel: 'mitigation',
 	phase: 'all',
-	onboarding: Number(localStorage.getItem('webtimelineOnboardingDone') ?? 0) ? -1 : 0,
 	job: 'DRK',
 	acr: 'KANO',
 	critRate: 18,
 	directRate: 28,
 	luck: 'average',
 	inserted: [],
+	pendingTargetPicker: null,
 	insertSkillId: '',
 	focusedSkills: [],
+	lastTracedSkillId: null,
 	openDetailCollapses: [],
 	focusQuery: '',
 	importStatus: '',
 	importError: '',
 	showInsertDrawer: false,
 	insertSkillCategory: 'output',
+	rightSkillCategory: 'output',
 	potionAttribute: 'strength',
 	qtDraftStates: {},
+	overviewVisibleSections: {
+		boss: true,
+		mitigation: true,
+		damage: true,
+		potion: true,
+		opener: true,
+		qt: true,
+		burst: true,
+	},
 	showFocusPicker: false,
 	showAcrModal: false,
+	showAboutModal: false,
 	showAcrSimulation: localStorage.getItem('webtimelineShowAcrSimulation') !== '0',
 	editorMode: 'browse',
 	section: 'timeline',
@@ -65,18 +829,19 @@ const state = {
 	fflogsStatus: '',
 	fflogsError: '',
 	fflogsTargetGcdUtilization: 100,
+	hiddenTimelineRows: loadHiddenTimelineRows(),
 }
 
 const DEFAULT_TIMELINE_IMPORTS = [
 	{
 		id: 'kano-drk',
 		label: '导入黑骑轴',
-		url: assetUrl('resources/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json'),
+		url: assetUrl('./resources/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json'),
 	},
 	{
 		id: 'whm-02',
 		label: '导入白魔轴',
-		url: assetUrl('resources/timelines/时间轴参考/绝妖星白触发轴WHM02.json'),
+		url: assetUrl('./resources/timelines/时间轴参考/绝妖星白触发轴WHM02.json'),
 	},
 ]
 
@@ -106,11 +871,15 @@ const BOSS_DAMAGE_HINTS = new Map([
 ])
 
 const POTION_ATTRIBUTES = [
-	{id: 'strength', label: '刚力', shortLabel: '力', role: '力量系'},
-	{id: 'dexterity', label: '巧力', shortLabel: '巧', role: '敏捷系'},
-	{id: 'intelligence', label: '智力', shortLabel: '智', role: '法系输出'},
-	{id: 'mind', label: '意力', shortLabel: '意', role: '治疗系'},
+	{id: 'strength', labelKey: 'potion.attr.strength', shortLabel: '力', roleKey: 'potion.role.strength'},
+	{id: 'dexterity', labelKey: 'potion.attr.dexterity', shortLabel: '巧', roleKey: 'potion.role.dexterity'},
+	{id: 'intelligence', labelKey: 'potion.attr.intelligence', shortLabel: '智', roleKey: 'potion.role.intelligence'},
+	{id: 'mind', labelKey: 'potion.attr.mind', shortLabel: '意', roleKey: 'potion.role.mind'},
 ]
+
+function potionAttributeLabel(attributeId) {
+	return t(`potion.attr.${attributeId}`, POTION_ATTRIBUTES.find(attribute => attribute.id === attributeId)?.shortLabel ?? '')
+}
 
 const COMBAT_POTION_TIERS = [
 	{id: 'gemdraught-g2', tier: '7.x', level: 100, label: '2级', familyLabel: '宝药', name: 'Grade 2 Gemdraught'},
@@ -124,6 +893,21 @@ const COMBAT_POTION_TIERS = [
 	{id: 'tincture-g2', tier: '4.x', level: 70, label: '2级', familyLabel: '幻药', name: 'Grade 2 Tincture'},
 	{id: 'tincture-g1', tier: '4.x', level: 70, label: '1级', familyLabel: '幻药', name: 'Grade 1 Tincture'},
 ]
+
+const OVERVIEW_SECTION_TOGGLES = [
+{id: 'boss', labelKey: 'overview.boss'},
+{id: 'mitigation', labelKey: 'overview.mitigation'},
+{id: 'damage', labelKey: 'overview.damage'},
+{id: 'potion', labelKey: 'overview.potion'},
+{id: 'opener', labelKey: 'overview.opener'},
+{id: 'qt', labelKey: 'overview.qt'},
+{id: 'burst', labelKey: 'overview.burst'},
+]
+
+const PLAYER_TIMELINE_ITEM_WIDTH_PX = 42
+const PLAYER_TIMELINE_ITEM_GAP_PX = 8
+const BOSS_CAST_MIN_VISUAL_WIDTH_PX = 148
+const BOSS_CAST_VISUAL_GAP_PX = 8
 
 const app = document.querySelector('#app')
 
@@ -141,6 +925,11 @@ let timelineDragGuideCache = null
 init()
 
 async function init() {
+	document.documentElement.lang = state.language
+	const bootEl = document.querySelector('.boot')
+	if (bootEl) {
+		bootEl.textContent = t('boot.loading')
+	}
 	const response = await fetch(assetUrl('data/prototype.json'))
 	state.model = await response.json()
 	state.baseAcrSimulation = state.model.acrSimulation
@@ -154,8 +943,26 @@ document.addEventListener('click', event => {
 		suppressInsertSkillClick = false
 		return
 	}
-	const target = event.target.closest('[data-action], [data-panel], [data-section], [data-insert-category], [data-potion-attribute], [data-phase], [data-toggle], [data-focus-skill], [data-remove-focus], [data-import-default], [data-manual-id]')
+	/* Click directly on a modal backdrop (not its inner panel) closes the modal. */
+	if (event.target.classList?.contains('modal-backdrop') && event.target.dataset.backdropClose) {
+		if (event.target.dataset.backdropClose === 'about' && state.showAboutModal) {
+			state.showAboutModal = false
+			render()
+		}
+		return
+	}
+	const langTarget = event.target.closest('[data-lang]')
+	if (langTarget) {
+		setLanguage(langTarget.dataset.lang)
+		return
+	}
+
+	const target = event.target.closest('[data-action], [data-panel], [data-section], [data-insert-category], [data-right-skill-category], [data-potion-attribute], [data-phase], [data-toggle], [data-focus-skill], [data-remove-focus], [data-import-default], [data-manual-id], [data-manual-target-choice], [data-locate-event-key], [data-overview-expand], [data-overview-locate-event]')
 	if (!target) {
+		if (state.pendingTargetPicker && !event.target.closest('[data-target-picker-overlay]')) {
+			state.pendingTargetPicker = null
+			render()
+		}
 		return
 	}
 
@@ -207,16 +1014,39 @@ document.addEventListener('click', event => {
 		return
 	}
 
-	if (target.dataset.toggle === 'editor-mode') {
-		state.editorMode = state.editorMode === 'edit' ? 'browse' : 'edit'
-		if (!canEditTimeline()) {
-			state.showInsertDrawer = false
-		}
+	if (target.dataset.overviewExpand) {
+		const id = `overview-${target.dataset.overviewExpand}`
+		setDetailCollapseOpen(id, !isDetailCollapseOpen(id))
 		render()
 		return
 	}
 
+	if (target.dataset.overviewLocateEvent) {
+		locateTimelineEventInCurrentPhase(target.dataset.overviewLocateEvent)
+		return
+	}
+
+	if (target.dataset.toggle === 'editor-mode') {
+		setEditorMode(state.editorMode === 'edit' ? 'browse' : 'edit')
+		return
+	}
+
 	const action = target.dataset.action
+	if (action === 'toggle-timeline-row') {
+		toggleTimelineRowVisibility(target.dataset.rowKey)
+		return
+	}
+	if (action === 'toggle-all-timeline-rows') {
+		toggleAllTimelineRowVisibility(buildVisualTimelineRows(state.model.tracks.expert))
+		return
+	}
+	if (action === 'choose-manual-target') {
+		event.preventDefault()
+		event.stopPropagation()
+		updateManualSkillTarget(target.dataset.manualTargetChoice, target.dataset.targetValue)
+		return
+	}
+
 	if (action === 'remove-focused-skill') {
 		removeFocusedSkill(target.dataset.focusSkill ?? target.dataset.removeFocus)
 		return
@@ -226,6 +1056,17 @@ document.addEventListener('click', event => {
 		event.preventDefault()
 		event.stopPropagation()
 		locateTimelineEvent(target.dataset.timelineEventKey)
+		return
+	}
+
+	if (action === 'trace-skill-on-timeline') {
+		event.preventDefault()
+		event.stopPropagation()
+		const ids = (target.dataset.traceSkillIds || target.dataset.traceSkillId || '')
+			.split(',')
+			.map(id => id.trim())
+			.filter(Boolean)
+		traceSkillOnTimeline(ids, target)
 		return
 	}
 
@@ -242,17 +1083,12 @@ document.addEventListener('click', event => {
 		return
 	}
 
-	if (action === 'skip-onboarding') {
-		state.onboarding = -1
-		localStorage.setItem('webtimelineOnboardingDone', '1')
-		render()
+	if (target.dataset.locateEventKey) {
+		event.preventDefault()
+		locateDetailEventFromTimeline(target.dataset.locateEventKey)
 		return
 	}
-	if (action === 'next-onboarding') {
-		state.onboarding += 1
-		render()
-		return
-	}
+
 	if (action === 'insert-skill') {
 		insertManualSkill()
 		return
@@ -311,6 +1147,11 @@ document.addEventListener('click', event => {
 		render()
 		return
 	}
+	if (action === 'close-target-picker') {
+		state.pendingTargetPicker = null
+		render()
+		return
+	}
 	if (action === 'open-acr-database') {
 		state.showAcrModal = true
 		render()
@@ -318,6 +1159,16 @@ document.addEventListener('click', event => {
 	}
 	if (action === 'close-acr-database') {
 		state.showAcrModal = false
+		render()
+		return
+	}
+	if (action === 'open-about') {
+		state.showAboutModal = true
+		render()
+		return
+	}
+	if (action === 'close-about') {
+		state.showAboutModal = false
 		render()
 		return
 	}
@@ -346,6 +1197,22 @@ document.addEventListener('click', event => {
 	}
 	if (target.dataset.importDefault) {
 		importDefaultTimeline(target.dataset.importDefault)
+		return
+	}
+})
+
+document.addEventListener('keydown', event => {
+	if (event.key !== 'Escape') {
+		return
+	}
+	if (state.showAboutModal) {
+		state.showAboutModal = false
+		render()
+		return
+	}
+	if (state.showAcrModal) {
+		state.showAcrModal = false
+		render()
 		return
 	}
 })
@@ -389,6 +1256,7 @@ document.addEventListener('dragstart', event => {
 			event.preventDefault()
 			return
 		}
+		document.body.classList.add('is-insert-skill-dragging')
 		event.dataTransfer.effectAllowed = 'copy'
 		event.dataTransfer.setData('application/x-webtimeline-burst', burst.dataset.dragBurst)
 		event.dataTransfer.setData('text/plain', burst.dataset.dragBurst)
@@ -401,6 +1269,7 @@ document.addEventListener('dragstart', event => {
 			event.preventDefault()
 			return
 		}
+		document.body.classList.add('is-insert-skill-dragging')
 		event.dataTransfer.effectAllowed = 'copy'
 		event.dataTransfer.setData('application/x-webtimeline-qt', qt.dataset.dragQt)
 		event.dataTransfer.setData('text/plain', qt.dataset.dragQt)
@@ -413,6 +1282,7 @@ document.addEventListener('dragstart', event => {
 			event.preventDefault()
 			return
 		}
+		document.body.classList.add('is-insert-skill-dragging')
 		event.dataTransfer.effectAllowed = 'copy'
 		event.dataTransfer.setData('application/x-webtimeline-potion', potion.dataset.dragPotion)
 		event.dataTransfer.setData('text/plain', potion.dataset.dragPotion)
@@ -424,6 +1294,7 @@ document.addEventListener('dragstart', event => {
 		event.preventDefault()
 		return
 	}
+	document.body.classList.add('is-insert-skill-dragging')
 	event.dataTransfer.effectAllowed = 'copy'
 	event.dataTransfer.setData('application/x-webtimeline-skill', skill.dataset.dragSkill)
 	event.dataTransfer.setData('text/plain', skill.dataset.dragSkill)
@@ -500,6 +1371,7 @@ document.addEventListener('dragleave', event => {
 
 document.addEventListener('dragend', () => {
 	hideTimelineDragGuide()
+	document.body.classList.remove('is-insert-skill-dragging')
 })
 
 document.addEventListener('click', event => {
@@ -728,6 +1600,10 @@ document.addEventListener('input', event => {
 		setFflogsTargetGcdUtilization(target.value, {silent: true})
 		return
 	}
+	if (target.dataset.field === 'editor-mode') {
+		setEditorMode(target.value)
+		return
+	}
 
 	state[target.dataset.field] = target.value
 	if (target.dataset.field === 'critRate' || target.dataset.field === 'directRate' || target.dataset.field === 'luck') {
@@ -748,6 +1624,12 @@ document.addEventListener('input', event => {
 })
 
 document.addEventListener('change', event => {
+	const overviewToggle = event.target.closest('[data-overview-section-toggle]')
+	if (overviewToggle) {
+		toggleOverviewSection(overviewToggle.dataset.overviewSectionToggle, overviewToggle.checked)
+		return
+	}
+
 	const detailTimeTarget = event.target.closest('[data-detail-time]')
 	if (detailTimeTarget) {
 		updateDetailEventTime(detailTimeTarget.dataset.detailTime, detailTimeTarget.value)
@@ -784,23 +1666,56 @@ function render() {
 	if (!model) {
 		return
 	}
+	const timelineViewport = captureTimelineViewport()
 	hideTimelineDragGuide()
 
 	app.innerHTML = `
-		${renderOnboarding(model)}
+		${renderTopbar(model)}
 		<div class="app-shell">
+			${renderSideRail(model)}
 			<main class="workspace">
-				${renderTopbar(model)}
 				${renderImportFeedback()}
 				${state.section === 'tools' ? renderToolPanel(model) : renderUnifiedEditor(model)}
 			</main>
-			${renderInsertFloat(model)}
-			${renderAcrDock(model)}
 		</div>
+		${renderInsertFloat(model)}
+		${renderAcrDock(model)}
 		${renderFocusSkillModal(model)}
 		${renderAcrModal(model)}
+		${renderAboutModal(model)}
+		${renderPendingTargetPickerOverlay(model)}
 	`
+	restoreTimelineViewport(timelineViewport)
+	positionTargetPickerOverlay()
+	requestAnimationFrame(() => {
+		restoreTimelineViewport(timelineViewport)
+		positionTargetPickerOverlay()
+		updateTimelineNav()
+	})
 	updateDamage()
+}
+
+function captureTimelineViewport() {
+	const timeline = document.querySelector('.xiva-timeline')
+	if (!timeline) {
+		return null
+	}
+	return {
+		scrollLeft: timeline.scrollLeft,
+		scrollTop: timeline.scrollTop,
+	}
+}
+
+function restoreTimelineViewport(viewport) {
+	if (!viewport) {
+		return
+	}
+	const timeline = document.querySelector('.xiva-timeline')
+	if (!timeline) {
+		return
+	}
+	timeline.scrollLeft = viewport.scrollLeft
+	timeline.scrollTop = viewport.scrollTop
 }
 
 function renderImportFeedback() {
@@ -812,30 +1727,43 @@ function renderImportFeedback() {
 	return `<div class="import-feedback ${kind}" role="status">${escapeHtml(message)}</div>`
 }
 
-function renderOnboarding(model) {
-	if (state.onboarding < 0) {
-		return ''
+function renderSideRail(model) {
+	const navItems = [
+		{id: 'timeline', icon: 'T', label: t('rail.timeline'), enabled: true},
+		{id: 'tools', icon: 'G', label: t('rail.tools'), enabled: true},
+	]
+	const aboutItem = {id: 'about', icon: INFO_ICON_SVG, label: t('rail.about'), enabled: true, action: 'open-about', open: state.showAboutModal}
+	const renderRailButton = item => {
+		const active = item.id === 'about'
+			? (item.open ? 'active' : '')
+			: (state.section === item.id ? 'active' : '')
+		const trigger = item.action ? `data-action="${item.action}"` : `data-section="${item.id}"`
+		return `
+			<button
+				class="rail-icon-button ${active} ${item.enabled === false ? 'muted' : ''}"
+				${item.enabled === false ? 'disabled' : trigger}
+				title="${item.label}"
+				aria-label="${item.label}"
+			>
+				<span>${item.icon}</span>
+				<small>${item.label}</small>
+			</button>
+		`
 	}
-	const step = model.onboarding[state.onboarding]
-	const isLast = state.onboarding === model.onboarding.length - 1
+	const visibilityRail = state.section === 'timeline' && model?.tracks?.expert
+		? `<div class="side-rail-visibility">${renderTimelineVisibilityRail(currentVisualTimelineRows(model))}</div>`
+		: ''
 	return `
-		<section class="onboarding" role="dialog" aria-modal="true">
-			<div class="onboarding-panel">
-				<div class="onboarding-boss-avatar" aria-hidden="true">${renderBossAvatar('凯夫卡')}</div>
-				<div class="onboarding-copy">
-					<p class="eyebrow">新手引导 ${state.onboarding + 1}/${model.onboarding.length}</p>
-					<h1>${step.title}</h1>
-					<p>${step.body}</p>
-					<div class="onboarding-progress">
-						${model.onboarding.map((_, index) => `<span class="${index === state.onboarding ? 'active' : ''}"></span>`).join('')}
-					</div>
-					<div class="button-row">
-						<button class="ghost" data-action="skip-onboarding">跳过</button>
-						<button class="primary" data-action="${isLast ? 'skip-onboarding' : 'next-onboarding'}">${isLast ? '进入编辑器' : '下一步'}</button>
-					</div>
-				</div>
-			</div>
-		</section>
+		<aside class="side-rail" aria-label="WebTimeline">
+			<div class="side-rail-brand" aria-hidden="true">${renderBossAvatar('neo')}</div>
+			<nav class="side-rail-nav">
+				${navItems.map(renderRailButton).join('')}
+			</nav>
+			${visibilityRail}
+			<nav class="side-rail-footer">
+				${renderRailButton(aboutItem)}
+			</nav>
+		</aside>
 	`
 }
 
@@ -845,15 +1773,15 @@ function renderSidebar(model) {
 			<div class="brand-lockup">
 				<div class="brand-boss-avatar" aria-hidden="true">${renderBossAvatar('凯夫卡')}</div>
 				<div>
-					<p class="eyebrow">WebTimeline</p>
-					<strong>妖星编辑器</strong>
-				</div>
+<p class="eyebrow">WebTimeline</p>
+				<strong>${t('brand.subtitle')}</strong>
 			</div>
-			<nav class="rail-nav" aria-label="编辑分区">
-				<button class="rail-item active">时间轴编辑</button>
-				<button class="rail-item">FFLogs 对比</button>
-				<button class="rail-item">伤害模拟</button>
-				<button class="rail-item muted">8人团队模式</button>
+		</div>
+		<nav class="rail-nav" aria-label="${t('aria.editSection')}">
+			<button class="rail-item active">${t('nav.timeline')}</button>
+			<button class="rail-item">${t('nav.fflogs')}</button>
+			<button class="rail-item">${t('nav.simulation')}</button>
+			<button class="rail-item muted">${t('nav.teamMode')}</button>
 			</nav>
 			<section class="share-mini">
 				<p class="eyebrow">${model.shareCard.timelineName ?? model.encounter.name}</p>
@@ -870,14 +1798,14 @@ function renderCompactNav(model) {
 			<div class="brand-lockup compact-brand">
 				<div class="brand-boss-avatar" aria-hidden="true">${renderBossAvatar('凯夫卡')}</div>
 				<div>
-					<p class="eyebrow">WebTimeline</p>
-					<strong>妖星编辑器</strong>
-				</div>
+<p class="eyebrow">WebTimeline</p>
+				<strong>${t('brand.subtitle')}</strong>
 			</div>
-			<nav class="rail-nav compact-rail" aria-label="编辑分区">
-				<button class="rail-item ${state.section === 'timeline' ? 'active' : ''}" data-section="timeline">时间轴编辑</button>
-				<button class="rail-item ${state.section === 'tools' ? 'active' : ''}" data-section="tools">工具</button>
-				<button class="rail-item muted">8人团队模式</button>
+		</div>
+		<nav class="rail-nav compact-rail" aria-label="${t('aria.editSection')}">
+				<button class="rail-item ${state.section === 'timeline' ? 'active' : ''}" data-section="timeline">${t('nav.timeline')}</button>
+				<button class="rail-item ${state.section === 'tools' ? 'active' : ''}" data-section="tools">${t('nav.tools')}</button>
+				<button class="rail-item muted">${t('nav.teamMode')}</button>
 			</nav>
 			<section class="share-mini compact-share">
 				<p class="eyebrow">${model.shareCard.timelineName ?? model.encounter.name}</p>
@@ -891,8 +1819,21 @@ function renderTopbar(model) {
 	const selectedJob = model.acrDatabase.jobs.find(job => job.id === state.job) ?? model.acrDatabase.jobs[0]
 	return `
 		<header class="topbar">
+			<div class="topbar-left">
+				<div class="topbar-brand">
+					<div class="brand-boss-avatar" aria-hidden="true">${renderBossAvatar('neo')}</div>
+					<div>
+						<strong>WebTimeline</strong>
+						<span>${t('brand.subtitle')}</span>
+					</div>
+				</div>
+<nav class="topbar-nav" aria-label="${t('aria.editSection')}">
+				<button class="topbar-nav-item ${state.section === 'timeline' ? 'active' : ''}" data-section="timeline">${t('nav.timeline')}</button>
+				<button class="topbar-nav-item ${state.section === 'tools' ? 'active' : ''}" data-section="tools">${t('nav.tools')}</button>
+				</nav>
+				<span class="topbar-divider" aria-hidden="true"></span>
+			</div>
 			<div class="topbar-main">
-				${renderCompactNav(model)}
 				<div class="topbar-title">
 					<div class="topbar-meta">
 						<p class="eyebrow">Territory ${model.encounter.territoryId} / ${model.encounter.job}</p>
@@ -902,23 +1843,30 @@ function renderTopbar(model) {
 				</div>
 			</div>
 			<div class="topbar-controls">
-				<button class="ghost mode-toggle ${state.editorMode === 'edit' ? 'active' : ''}" data-toggle="editor-mode">${state.editorMode === 'edit' ? '编辑模式' : '浏览模式'}</button>
-				<label>
-					<span>职业</span>
-					<select data-field="job">
-						${model.acrDatabase.jobs.map(job => `<option value="${job.id}" ${job.id === state.job ? 'selected' : ''} ${job.enabled ? '' : 'disabled'}>${job.name}${job.enabled ? '' : '（未接入）'}</option>`).join('')}
+				<label class="topbar-mode-field">
+					<span>${t('label.mode')}</span>
+					<select data-field="editor-mode" aria-label="${t('aria.editorMode')}">
+						<option value="browse" ${state.editorMode === 'browse' ? 'selected' : ''}>${t('mode.browse')}</option>
+						<option value="edit" ${state.editorMode === 'edit' ? 'selected' : ''}>${t('mode.edit')}</option>
 					</select>
 				</label>
 				<label>
-					<span>ACR</span>
-					<select data-field="acr">
+<span>${t('label.job')}</span>
+				<select data-field="job">
+					${model.acrDatabase.jobs.map(job => `<option value="${job.id}" ${job.id === state.job ? 'selected' : ''} ${job.enabled ? '' : 'disabled'}>${job.name}${job.enabled ? '' : `（${t('status.notConnected')}）`}</option>`).join('')}
+					</select>
+				</label>
+				<label>
+<span>${t('label.acr')}</span>
+				<select data-field="acr">
 						${selectedJob.acrs.map(acr => `<option value="${acr.name}" ${acr.name === state.acr ? 'selected' : ''} ${acr.enabled ? '' : 'disabled'}>${acr.name}</option>`).join('')}
 					</select>
 				</label>
-				${DEFAULT_TIMELINE_IMPORTS.map(source => `<button class="ghost compact" data-import-default="${source.id}">${source.label}</button>`).join('')}
-				<button class="ghost" data-action="import-timeline">导入</button>
-				<button class="ghost" data-action="export-timeline">导出</button>
-				<input class="hidden-file-input" type="file" accept=".json,application/json" data-field="timeline-import">
+			${DEFAULT_TIMELINE_IMPORTS.map(source => `<button class="ghost compact" data-import-default="${source.id}">${source.label}</button>`).join('')}
+			<button class="ghost" data-action="import-timeline">${t('action.import')}</button>
+			<button class="ghost" data-action="export-timeline">${t('action.export')}</button>
+			${renderLanguageSwitcher()}
+			<input class="hidden-file-input" type="file" accept=".json,application/json" data-field="timeline-import">
 			</div>
 		</header>
 	`
@@ -930,12 +1878,20 @@ function renderJobAcrStatus(model, selectedJob) {
 	const status = acrSupportStatus(job, acr)
 	return `
 		<div class="job-acr-status">
-			<span class="current">当前选择</span>
-			<span>职业：${job?.name ?? state.job ?? 'unknown'}</span>
-			<span>ACR：${acr?.name ?? state.acr ?? '未指定'}</span>
+			<span class="current">${t('status.current')}</span>
+			<span>${t('label.jobColon')}${job?.name ?? state.job ?? 'unknown'}</span>
+			<span>${t('label.acrColon')}${acr?.name ?? state.acr ?? t('status.unspecified')}</span>
 			${renderAcrStatusBadge(status)}
 		</div>
 	`
+}
+
+function setEditorMode(mode) {
+	state.editorMode = mode === 'edit' ? 'edit' : 'browse'
+	if (!canEditTimeline()) {
+		state.showInsertDrawer = false
+	}
+	render()
 }
 
 function renderUnifiedEditor(model) {
@@ -946,7 +1902,6 @@ function renderUnifiedEditor(model) {
 				${renderLaneTimeline(track)}
 			</section>
 			<section class="detail-panel">
-				${renderPanelTabs(model)}
 				${renderDetailPanel(model)}
 			</section>
 		</div>
@@ -968,7 +1923,7 @@ function renderInsertFloat(model) {
 	].filter(Boolean).join(' ')
 	return `
 		<div class="${classes}" style="left:${x}px; top:${y}px;">
-			<button class="insert-float-button ${state.showInsertDrawer ? 'active' : ''}" data-toggle="insert-drawer" data-insert-float-handle="true" title="拖动移动，点击打开编程模式面板" aria-label="拖动移动，点击打开编程模式面板">
+			<button class="insert-float-button ${state.showInsertDrawer ? 'active' : ''}" data-toggle="insert-drawer" data-insert-float-handle="true" title="${t('insert.floatTitle')}" aria-label="${t('insert.floatTitle')}">
 				<img class="insert-float-avatar" src="./assets/ui/programming-mode-button.jpg" alt="" loading="lazy" decoding="async">
 				<span class="insert-float-state" aria-hidden="true"></span>
 			</button>
@@ -985,22 +1940,23 @@ function renderBurstPlanner(bursts, options = {}) {
 			${bursts.slice(0, limit).map((burst, index) => {
 				const burstId = burst.burstIndex ?? index
 				const burstTimeMs = Number(burst.timeMs ?? burst.startMs ?? index * 60000)
-				const burstLabel = burst.window === '120s' ? '120 爆发' : '60 爆发'
+				const window = burstWindowForTime(burst, burstTimeMs, index)
+				const burstLabel = window === '120s' ? t('burst.120') : t('burst.60')
 				const qtItems = Array.isArray(burst.qt) ? burst.qt : []
 				return `
-				<article class="burst-window ${burst.window === '120s' ? 'major' : 'minor'}">
+				<article class="burst-window ${window === '120s' ? 'major' : 'minor'}">
 					<div>
-						<span>${burst.window}</span>
+						<span>${window}</span>
 						<strong>${burstLabel}</strong>
 					</div>
 					<div class="qt-pills">
-						${qtItems.map(qt => `<button data-qt="${qt}">${qt}</button>`).join('') || '<span>暂无 QT</span>'}
+						${qtItems.map(qt => `<button data-qt="${qt}">${qt}</button>`).join('') || `<span>${t('empty.noQt')}</span>`}
 					</div>
 					<label>
 						<span data-burst-time-label="${burstId}">${formatTime(burstTimeMs)}</span>
 						<input type="range" min="0" max="720" value="${Math.round(burstTimeMs / 1000)}" data-burst-time="${burstId}" aria-label="${burstLabel} 时间">
 					</label>
-					<button class="mini-button" data-action="quick-insert-burst-qt" data-burst-index="${burstId}" data-burst-time-ms="${burstTimeMs}">插入QT</button>
+					<button class="mini-button" data-action="quick-insert-burst-qt" data-burst-index="${burstId}" data-burst-time-ms="${burstTimeMs}">${t('action.insertQt')}</button>
 				</article>
 			`}).join('')}
 		</div>
@@ -1009,6 +1965,7 @@ function renderBurstPlanner(bursts, options = {}) {
 
 function renderLaneTimeline(track) {
 	const rows = buildVisualTimelineRows(track)
+	const visibleRows = visibleTimelineRows(rows)
 	const maxTime = timelineDurationMs(rows, state.model.bossTimeline?.source, state.phase)
 	const phases = phaseOptions(state.model.bossTimeline?.source)
 	const baseWidth = timelineBaseWidth(maxTime)
@@ -1023,24 +1980,32 @@ function renderLaneTimeline(track) {
 					<strong>Timeline</strong>
 					<span>${sourceSummary}</span>
 				</div>
+				<div class="timeline-phase-controls">
+					<div class="timeline-nav-bar compact" data-timeline-nav aria-label="Timeline horizontal navigator">
+						<div class="timeline-nav-track" data-timeline-nav-track>
+							<div class="timeline-nav-thumb" data-timeline-nav-thumb>
+								<img class="timeline-nav-mascot" src="./assets/ui/pixel-mascot-timeline-v1.png" alt="" loading="lazy" decoding="async">
+							</div>
+						</div>
+					</div>
+				</div>
 				<div class="phase-switch" aria-label="Boss phase filter">
-					<button class="${state.phase === 'all' ? 'active' : ''}" data-phase="all">全部</button>
+					<button class="${state.phase === 'all' ? 'active' : ''}" data-phase="all">${t('phase.all')}</button>
 					${phases.map(phase => `<button class="${state.phase === phase.id ? 'active' : ''}" data-phase="${phase.id}">${phase.label}</button>`).join('')}
 				</div>
 				<div class="xiva-legend">
-					<span><i class="legend-cast"></i>Boss</span>
-					<span><i class="legend-action"></i>输出</span>
-					<span><i class="legend-mitigation"></i>减伤</span>
-					<span><i class="legend-burst"></i>爆发</span>
-					<span><i class="legend-simulated"></i>ACR</span>
+					<span><i class="legend-cast"></i>${t('legend.boss')}</span>
+					<span><i class="legend-action"></i>${t('legend.output')}</span>
+					<span><i class="legend-mitigation"></i>${t('legend.mitigation')}</span>
+					<span><i class="legend-burst"></i>${t('legend.burst')}</span>
 				</div>
-				<button class="sim-toggle ${state.showAcrSimulation ? 'active' : ''}" data-toggle="acr-simulation">${state.showAcrSimulation ? '隐藏 ACR 模拟' : '显示 ACR 模拟'}</button>
+				<button class="sim-toggle ${state.showAcrSimulation ? 'active' : ''}" data-toggle="acr-simulation">${state.showAcrSimulation ? t('sim.hide') : t('sim.show')}</button>
 			</div>
 			<div class="xiva-timeline">
 				${renderTimelineDragGuide()}
 				<div class="xiva-label xiva-axis-label">Time</div>
 				<div class="xiva-track xiva-axis">${renderTimelineAxis(maxTime)}</div>
-				${rows.map(row => renderTimelineRow(row, maxTime, timelineWidth)).join('')}
+				${visibleRows.map(row => renderTimelineRow(row, maxTime, timelineWidth)).join('')}
 			</div>
 		</div>
 	`
@@ -1051,15 +2016,15 @@ function renderSkillDrawer(track) {
 	const activeGroup = groups.find(group => group.id === state.insertSkillCategory) ?? groups[0]
 	return `
 		<section class="skill-drawer floating-skill-drawer">
-			<div class="section-heading insert-panel-heading" data-insert-panel-handle="true" title="拖动移动插入技能面板">
-				<div>
-					<p class="eyebrow">插入技能</p>
-					<h3>拖入时间轴或点击卡片立即生成手动技能</h3>
+			<div class="section-heading insert-panel-heading" data-insert-panel-handle="true" title="${t('insert.panelHandle')}">
+				<div class="insert-panel-title">
+					<p class="eyebrow">${t('insert.title')}</p>
+					<h3>${t('insert.hint')}</h3>
 				</div>
 				${renderInsertTool()}
 			</div>
 			<div class="insert-category-tabs">
-				${groups.map(group => `<button class="${group.id === activeGroup.id ? 'active' : ''}" data-insert-category="${group.id}">${group.label}<small>${group.skills.length}</small></button>`).join('')}
+				${groups.map(group => `<button class="${group.id === activeGroup.id ? 'active' : ''}" data-insert-category="${group.id}"><span>${group.label}</span><small>${group.skills.length}</small></button>`).join('')}
 			</div>
 			${activeGroup.id === 'burst' ? renderBurstInsertPanel(activeGroup.skills) : activeGroup.id === 'potion' ? renderPotionInsertPanel(activeGroup.skills) : renderInsertSkillGroupContent(activeGroup)}
 		</section>
@@ -1069,7 +2034,7 @@ function renderSkillDrawer(track) {
 function renderInsertSkillGroupContent(activeGroup) {
 	return activeGroup.id === 'qt' ? renderQtGamePanel(activeGroup.skills) : `
 		<div class="skill-strip">
-			${activeGroup.skills.length ? activeGroup.skills.map(event => event.type === 'burst-insert' ? renderBurstInsertCard(event) : event.type === 'qt-insert' ? renderQtInsertCard(event) : renderSkillCard(event)).join('') : '<p class="empty-state">这个分类暂无技能</p>'}
+			${activeGroup.skills.length ? activeGroup.skills.map(event => event.type === 'burst-insert' ? renderBurstInsertCard(event) : event.type === 'qt-insert' ? renderQtInsertCard(event) : renderSkillCard(event)).join('') : `<p class="empty-state">${t('empty.noSkillInCategory')}</p>`}
 		</div>
 	`
 }
@@ -1077,10 +2042,10 @@ function renderInsertSkillGroupContent(activeGroup) {
 function renderQtGamePanel(skills = []) {
 	return `
 		<div class="qt-game-panel">
-			<p class="qt-panel-note">点击左侧 QT 只会切换本次草稿；右侧确认要写入的逻辑，没问题后再插入。</p>
+			<p class="qt-panel-note">${t('qt.note')}</p>
 			<div class="qt-game-layout">
 				<div class="qt-game-grid">
-					${skills.length ? skills.map(renderQtInsertCard).join('') : '<p class="empty-state">暂时没有解析到 QT 状态</p>'}
+					${skills.length ? skills.map(renderQtInsertCard).join('') : `<p class="empty-state">${t('empty.noQtState')}</p>`}
 				</div>
 				${renderQtDraftPanel(skills)}
 			</div>
@@ -1093,18 +2058,18 @@ function renderQtDraftPanel(skills = []) {
 	return `
 		<aside class="qt-draft-panel">
 			<div class="qt-draft-heading">
-				<strong>本次插入逻辑</strong>
-				<small>${changes.length} 项变更</small>
+				<strong>${t('qt.draftTitle')}</strong>
+				<small>${changes.length} ${t('qt.draftChanges')}</small>
 			</div>
 			<div class="qt-draft-logic">
 				${changes.length ? changes.map(change => `
 					<div class="qt-draft-row">
 						<span>${escapeHtml(change.name)}</span>
-						<strong>${change.enabled ? '开启' : '关闭'}</strong>
+						<strong>${change.enabled ? t('qt.on') : t('qt.off')}</strong>
 					</div>
-				`).join('') : '<p class="empty-state">先点击左侧 QT 开关</p>'}
+				`).join('') : `<p class="empty-state">${t('empty.qtDraftEmpty')}</p>`}
 			</div>
-			<button class="mini-button qt-draft-insert" data-action="insert-qt-draft" ${changes.length ? '' : 'disabled'}>插入</button>
+			<button class="mini-button qt-draft-insert" data-action="insert-qt-draft" ${changes.length ? '' : 'disabled'}>${t('action.insert')}</button>
 		</aside>
 	`
 }
@@ -1114,11 +2079,11 @@ function renderBurstInsertPanel(bursts) {
 	return `
 		<div class="insert-burst-panel">
 			<div class="insert-burst-heading">
-				<strong>爆发包</strong>
-				<span>拖到时间轴或点击插入 60 / 120 爆发模板</span>
+				<strong>${t('burst.title')}</strong>
+				<span>${t('burst.hint')}</span>
 			</div>
 			<div class="insert-burst-card-grid">
-				${choices.length ? choices.map(renderBurstInsertCard).join('') : '<p class="empty-state">暂无可插入的爆发包</p>'}
+				${choices.length ? choices.map(renderBurstInsertCard).join('') : `<p class="empty-state">${t('empty.noBurst')}</p>`}
 			</div>
 		</div>
 	`
@@ -1129,27 +2094,32 @@ function renderPotionInsertPanel(potions = []) {
 	return `
 		<div class="insert-potion-panel">
 			<div class="insert-burst-heading">
-				<strong>爆发药</strong>
-				<span>先选属性，再在下方选择等级；插入后作为 30 秒爆发药窗口，冷却按 4:30 处理</span>
+				<strong>${t('potion.title')}</strong>
+				<span>${t('potion.hint')}</span>
 			</div>
-			<div class="potion-attribute-grid" role="tablist" aria-label="爆发药属性">
+			<div class="potion-attribute-grid" role="tablist" aria-label="${t('potion.attributeAria')}">
 				${POTION_ATTRIBUTES.map(attribute => `
-					<button class="potion-attribute-card ${attribute.id === activeAttribute.id ? 'active' : ''}" type="button" data-potion-attribute="${attribute.id}" aria-pressed="${attribute.id === activeAttribute.id ? 'true' : 'false'}" title="选择${escapeHtml(attribute.label)}药">
-						<strong>${escapeHtml(attribute.label)}</strong>
-						<small>${escapeHtml(attribute.role)}</small>
+					<button class="potion-attribute-card ${attribute.id === activeAttribute.id ? 'active' : ''}" type="button" data-potion-attribute="${attribute.id}" aria-pressed="${attribute.id === activeAttribute.id ? 'true' : 'false'}" title="${escapeHtml(t(attribute.labelKey))}${t('potion.selectSuffix')}">
+						<strong>${escapeHtml(t(attribute.labelKey))}</strong>
+						<small>${escapeHtml(t(attribute.roleKey))}</small>
 					</button>
 				`).join('')}
 			</div>
 			<div class="insert-potion-card-grid">
-				${potions.length ? potions.map(renderPotionInsertCard).join('') : '<p class="empty-state">暂无可插入的爆发药</p>'}
+				${potions.length ? potions.map(renderPotionInsertCard).join('') : `<p class="empty-state">${t('empty.noPotion')}</p>`}
 			</div>
 		</div>
 	`
 }
 
 function uniqueBurstInsertChoices(bursts) {
-	const sixtySecondBurst = (bursts ?? []).find(burst => burst.window === '60s') ?? fallbackBurstInsertChoice('60s')
-	const oneTwentySecondBurst = (bursts ?? []).find(burst => burst.window === '120s') ?? fallbackBurstInsertChoice('120s')
+	const normalized = (bursts ?? []).map((burst, index) => {
+		const timeMs = Number(burst.timeMs ?? burst.startMs ?? index * 60000)
+		const window = burstWindowForTime(burst, timeMs, index)
+		return {...burst, timeMs, window, name: burstLabelForWindow(window)}
+	})
+	const sixtySecondBurst = normalized.find(burst => burst.window === '60s') ?? fallbackBurstInsertChoice('60s')
+	const oneTwentySecondBurst = normalized.find(burst => burst.window === '120s') ?? fallbackBurstInsertChoice('120s')
 	return [sixtySecondBurst, oneTwentySecondBurst].filter(Boolean)
 }
 
@@ -1158,7 +2128,7 @@ function fallbackBurstInsertChoice(window) {
 		id: `burst-insert-${window}`,
 		type: 'burst-insert',
 		window,
-		name: window === '120s' ? '120 爆发包' : '60 爆发包',
+		name: window === '120s' ? '120 爆发' : '60 爆发',
 		timeMs: window === '120s' ? 120000 : 60000,
 		durationMs: 12000,
 		source: 'manual',
@@ -1178,17 +2148,17 @@ function insertSkillGroups(track) {
 		...event,
 		sidebarType: insertSidebarType(event),
 	}))
-	const skills = uniqueSkillEvents([...timelineSkills, ...currentJobSkills])
+	const skills = uniqueSkillLibraryItems([...timelineSkills, ...currentJobSkills])
 		.sort(compareInsertSkills)
 	const burstGroups = burstInsertGroups(track)
 	const qtControls = insertQtControls(track)
 	const groups = [
-		{id: 'all', label: '全部', skills},
-		{id: 'output', label: '输出', skills: skills.filter(event => event.sidebarType === 'output')},
-		{id: 'mitigation', label: '减伤', skills: skills.filter(event => event.sidebarType === 'mitigation')},
-		{id: 'potion', label: '爆发药', skills: potionInsertItems()},
-		{id: 'qt', label: 'QT', skills: qtControls},
-		{id: 'burst', label: '爆发', skills: burstGroups},
+{id: 'all', label: t('category.all'), skills},
+{id: 'output', label: t('category.output'), skills: skills.filter(event => event.sidebarType === 'output')},
+{id: 'mitigation', label: t('category.mitigation'), skills: skills.filter(event => event.sidebarType === 'mitigation')},
+{id: 'potion', label: t('category.potion'), skills: potionInsertItems()},
+{id: 'qt', label: t('category.qt'), skills: qtControls},
+{id: 'burst', label: t('category.burst'), skills: burstGroups},
 	]
 	if (!groups.some(group => group.id === state.insertSkillCategory)) {
 		state.insertSkillCategory = 'all'
@@ -1201,16 +2171,18 @@ function potionInsertItems() {
 }
 
 function potionInsertItemsForAttribute(attribute) {
-	return COMBAT_POTION_TIERS.map((tier, index) => ({
-		...tier,
-		potionId: `${tier.id}-${attribute.id}`,
-		attributeId: attribute.id,
-		attributeLabel: attribute.label,
-		attributeRole: attribute.role,
-		type: 'potion-insert',
-		name: `${tier.label}${attribute.label}药`,
-		label: `${tier.label}${attribute.label}药`,
-		cnName: `${tier.label}${attribute.label}之${tier.familyLabel}`,
+const attrLabel = t(attribute.labelKey)
+const attrRole = t(attribute.roleKey)
+return COMBAT_POTION_TIERS.map((tier, index) => ({
+...tier,
+potionId: `${tier.id}-${attribute.id}`,
+attributeId: attribute.id,
+attributeLabel: attrLabel,
+attributeRole: attrRole,
+type: 'potion-insert',
+name: `${tier.label}${attrLabel}${t('potion.selectSuffix')}`,
+label: `${tier.label}${attrLabel}${t('potion.selectSuffix')}`,
+cnName: `${tier.label}${attrLabel}之${tier.familyLabel}`,
 		timeMs: index * 1000,
 		durationMs: 30000,
 		recastMs: 270000,
@@ -1236,10 +2208,6 @@ function setPotionAttribute(attributeId) {
 		? attributeId
 		: POTION_ATTRIBUTES[0].id
 	render()
-}
-
-function potionAttributeLabel(attributeId) {
-	return POTION_ATTRIBUTES.find(attribute => attribute.id === attributeId)?.label ?? POTION_ATTRIBUTES[0].label
 }
 
 function currentJobInsertSkills() {
@@ -1294,17 +2262,21 @@ function isInsertOutputOverride(event = {}) {
 }
 
 function burstInsertGroups(track) {
-	return (track.burst ?? state.model.tracks.beginner?.burst ?? []).map((burst, index) => ({
-		id: `burst-insert-${index}`,
-		type: 'burst-insert',
-		window: burst.window ?? (Number(burst.timeMs ?? index * 60000) % 120000 === 0 ? '120s' : '60s'),
-		name: burst.window === '120s' ? '120 爆发包' : '60 爆发包',
-		timeMs: Number(burst.timeMs ?? index * 60000),
-		source: burst.source ?? 'ACR',
-		items: Array.isArray(burst.items) ? burst.items : [],
-		qt: Array.isArray(burst.qt) ? burst.qt : [],
-		burstIndex: index,
-	}))
+	return (track.burst ?? state.model.tracks.beginner?.burst ?? []).map((burst, index) => {
+		const timeMs = Number(burst.timeMs ?? burst.startMs ?? index * 60000)
+		const window = burstWindowForTime(burst, timeMs, index)
+		return {
+			id: `burst-insert-${index}`,
+			type: 'burst-insert',
+			window,
+			name: burstLabelForWindow(window),
+			timeMs,
+			source: burst.source ?? 'ACR',
+			items: Array.isArray(burst.items) ? burst.items : [],
+			qt: Array.isArray(burst.qt) ? burst.qt : [],
+			burstIndex: index,
+		}
+	})
 }
 
 function insertQtControls(track) {
@@ -1449,16 +2421,21 @@ function compareInsertSkills(left, right) {
 }
 
 function renderBurstInsertCard(event) {
-	const count = burstInsertSkillNames(event).length
-	const burstId = event.burstIndex
-	return `
-		<div class="skill-card burst-insert-card" draggable="true" data-action="quick-insert-burst" data-burst-index="${burstId}" data-drag-burst="${event.burstIndex}" title="点击插入这个爆发包中可识别的职业技能，也可以拖入时间轴">
-			<span class="skill-icon fallback">${event.window === '120s' ? '120' : '60'}</span>
-			<strong>${event.name}</strong>
-			<small>${formatTime(event.timeMs)} / ${count} 项</small>
-			<button type="button" data-action="quick-insert-burst" data-burst-index="${burstId}" title="插入爆发包">+</button>
-		</div>
-	`
+const count = burstInsertSkillNames(event).length
+const burstId = event.burstIndex
+const window = burstWindowForTime(event, Number(event.timeMs ?? event.startMs ?? 0), 0)
+const label = event.name ?? burstLabelForWindow(window)
+const title = `${label} / ${formatTime(event.timeMs)} / ${count} ${t('unit.items')} — ${t('hint.dragInsertBurst')}`
+return `
+<div class="skill-card burst-insert-card" draggable="true" data-action="quick-insert-burst" data-burst-index="${burstId}" data-drag-burst="${event.burstIndex}" title="${escapeHtml(title)}">
+<span class="skill-icon fallback">${window === '120s' ? '120' : '60'}</span>
+<span class="skill-card-body">
+<strong>${escapeHtml(label)}</strong>
+<small>${formatTime(event.timeMs)} / ${count} ${t('unit.items')}</small>
+</span>
+<span class="skill-card-source burst">${window}</span>
+</div>
+`
 }
 
 function renderPotionInsertCard(event) {
@@ -1467,21 +2444,25 @@ function renderPotionInsertCard(event) {
 	return `
 		<div class="skill-card potion-insert-card" draggable="true" data-action="quick-insert-potion" data-potion-id="${event.potionId}" data-drag-potion="${event.potionId}" title="${escapeHtml(title)}">
 			<span class="skill-icon fallback potion-icon">${escapeHtml(attributeLabel)}</span>
-			<strong>${escapeHtml(event.label)}</strong>
-			<small><span class="potion-tier-pill">${escapeHtml(event.tier)}</span>${escapeHtml(event.familyLabel)} / Lv.${event.level} / 30s</small>
-			<button type="button" data-action="quick-insert-potion" data-potion-id="${event.potionId}" title="插入爆发药">+</button>
+			<span class="skill-card-body">
+				<strong>${escapeHtml(event.label)}</strong>
+				<small><span class="potion-tier-pill">${escapeHtml(event.tier)}</span>${escapeHtml(event.familyLabel)} / Lv.${event.level} / 30s</small>
+			</span>
+			<span class="skill-card-source potion">${escapeHtml(event.tier)}</span>
 		</div>
 	`
 }
 
 function renderQtInsertCard(event) {
 	const enabled = qtDraftEnabledFor(event)
-	const title = `${event.name}：点击切换为${enabled ? '关闭' : '开启'}，拖拽到时间轴可直接插入当前草稿状态`
+	const title = `${event.name}：${enabled ? t('qt.off') : t('qt.on')}`
 	return `
 		<div class="qt-game-toggle ${qtDraftEnabledFor(event) ? 'is-on' : 'is-off'} qt-insert-card" draggable="true" data-action="toggle-qt-draft" data-qt-insert="${event.qtIndex}" data-drag-qt="${event.qtIndex}" data-qt-enabled="${qtDraftEnabledFor(event) ? 'true' : 'false'}" title="${escapeHtml(title)}">
 			<span class="qt-game-dot" aria-hidden="true"></span>
-			<strong>${escapeHtml(event.name)}</strong>
-			<small>${enabled ? '开' : '关'}</small>
+			<span class="skill-card-body">
+				<strong>${escapeHtml(event.name)}</strong>
+				<small>${enabled ? t('qt.on') : t('qt.off')}</small>
+			</span>
 		</div>
 	`
 }
@@ -1492,21 +2473,24 @@ function burstInsertSkillNames(event) {
 
 function renderSkillCard(event) {
 	const draggable = isDraggableSkillCard(event)
-	const lockedText = event.sidebarType === 'acr' ? 'ACR 自动技能已锁定，可关注查看，后续高手模式再允许复制为手动技能。' : '切到编辑模式后可拖入时间轴'
-	const title = draggable ? '拖入时间轴' : lockedText
+	const lockedText = event.sidebarType === 'acr' ? t('acr.lockedHint') : t('edit.lockedHint')
+	const title = draggable ? `${event.name} — ${t('hint.dragToTimeline')}` : `${event.name} — ${lockedText}`
+	const sourceTag = event.sidebarType === 'acr' ? `<span class="skill-card-source acr">${t('acr.lockedShort')}</span>` : ''
 	return `
-		<div class="skill-card ${event.sidebarType === 'acr' ? 'simulated acr-locked' : ''} ${draggable ? '' : 'locked'}" draggable="${draggable ? 'true' : 'false'}" data-action="quick-insert-skill" data-drag-skill="${event.actionId}" data-drag-locked="${draggable ? 'false' : 'true'}" data-skill-source="${event.sidebarType}" title="${title}">
+		<div class="skill-card ${event.sidebarType === 'acr' ? 'simulated acr-locked' : ''} ${draggable ? '' : 'locked'}" draggable="${draggable ? 'true' : 'false'}" data-action="quick-insert-skill" data-drag-skill="${event.actionId}" data-drag-locked="${draggable ? 'false' : 'true'}" data-skill-source="${event.sidebarType}" title="${escapeHtml(title)}">
 			${renderIcon(event.name, event.iconUrl)}
-			<strong>${event.name}</strong>
-			<small>${insertSkillCardMeta(event)}</small>
-			<button type="button" data-action="quick-insert-skill" data-drag-skill="${event.actionId}" title="插入到手动队列">+</button>
+			<span class="skill-card-body">
+				<strong>${escapeHtml(event.name)}</strong>
+				<small>${insertSkillCardMeta(event)}</small>
+			</span>
+			${sourceTag}
 		</div>
 	`
 }
 
 function insertSkillCardMeta(event) {
 	if (event.sidebarType === 'acr') {
-		return 'ACR 锁定'
+		return t('acr.lockedShort')
 	}
 	const action = actionById(event.actionId)
 	const level = action?.level ? `Lv.${action.level}` : ''
@@ -1515,10 +2499,10 @@ function insertSkillCardMeta(event) {
 }
 
 function insertSidebarLabel(type) {
-	if (type === 'output') return '输出'
-	if (type === 'mitigation') return '减伤'
-	if (type === 'potion') return '爆发药'
-	return ''
+if (type === 'output') return t('category.output')
+if (type === 'mitigation') return t('category.mitigation')
+if (type === 'potion') return t('category.potion')
+return ''
 }
 
 function isDraggableSkillCard(event) {
@@ -1556,41 +2540,45 @@ function renderEventChip(event, index, laneType) {
 }
 
 function buildVisualTimelineRows(track) {
+	const parsedMergedBossRows = state.model.timelineRows.filter(row => (row.groupId ?? row.id) === 'boss')
 	const parsedBossCastRows = state.model.timelineRows.filter(row => (row.groupId ?? row.id) === 'boss-casts')
 	const parsedBossDamageRows = state.model.timelineRows.filter(row => (row.groupId ?? row.id) === 'boss-damage')
-	const boss = track.boss.slice(0, 72)
 	const player = track.player ?? []
 	const mitigation = track.mitigation ?? []
 	const simulated = state.showAcrSimulation
 		? (track.simulated ?? state.model.acrSimulation?.events ?? [])
 		: []
+	const simulatedMitigation = simulated.filter(event => isCoverageTimelineEvent(event) || timelineFunctionalLane(event) === 'mitigation')
+	const simulatedOutput = simulated.filter(event => !isCoverageTimelineEvent(event) && timelineFunctionalLane(event) !== 'mitigation')
 	const manual = manualQueueEvents().map((item, index) => timelineManualItem(item, index))
 	const qtSource = timelineQtEvents(track)
 	const burstPackages = buildBurstPackageItems(track.burst ?? state.model.tracks.beginner?.burst ?? [])
+	const openerPanel = state.model.detailPanels.find(panel => panel.id === 'opener')
+	const openerItems = openerDetailEvents(openerPanel).map(event => timelineItemForEvent(event, {defaultType: event.potency > 0 ? 'gcd' : 'action'}))
 	const focused = focusedSkillRows()
-	const castItems = boss.map(event => ({
-		id: event.id,
-		type: 'cast',
-		label: event.name,
-		startMs: event.timeMs,
-		endMs: event.timeMs + (event.castDurationMs ?? 4700),
-		timeLabel: formatTime(event.timeMs),
-		damage: event.damage ?? 0,
-	}))
 	const bossCastRows = parsedBossCastRows.length
 		? parsedBossCastRows
-		: [{id: 'boss-casts', label: 'Boss Casts', accent: 'rose', items: castItems}]
+		: []
 	const bossDamageRows = parsedBossDamageRows.length
 		? parsedBossDamageRows
-		: [{id: 'boss-damage', label: 'Boss Damage', accent: 'gold', items: castItems.map(item => ({...item, id: `${item.id}-dmg`, type: 'damage', label: String(item.damage ?? 0), startMs: item.endMs, endMs: item.endMs + 1200}))}]
-	const bossRows = prepareBossTimelineRows(mergeBossCastAndDamageRows([...bossCastRows, ...bossDamageRows]), state.model.bossTimeline?.source, 'all', Infinity)
+		: []
+	const bossRows = prepareBossTimelineRows(
+		parsedMergedBossRows.length
+			? parsedMergedBossRows
+			: mergeBossCastAndDamageRows([...bossCastRows, ...bossDamageRows]),
+		state.model.bossTimeline?.source,
+		'all',
+		Infinity,
+	)
 	const rows = [
 		...bossRows,
-		{id: 'output-actions', label: '输出轴', accent: 'mint', items: buildOutputLaneItems(player, qtSource, manual)},
-		{id: 'mitigation-actions', label: '减伤 / 奶轴', accent: 'mint', items: buildMitigationLaneItems(mitigation, manual, qtSource)},
-		{id: 'burst-integration', label: '爆发', accent: 'orange', items: buildBurstLaneItems(burstPackages, qtSource, manual)},
-		{id: 'acr-simulated', label: 'ACR 模拟', accent: 'sky', items: simulated.map(event => timelineItemForEvent(event, {defaultType: event.output ? 'simulated-gcd' : 'simulated-action', simulated: true}))},
-		{id: 'focus-add', label: '+ 关注技能', labelHtml: renderFocusAddLabel(), accent: 'sky', html: renderFocusAddRow(), items: []},
+		{id: 'opener-actions', label: t('overview.opener'), accent: 'violet', keepWhenEmpty: true, items: openerItems},
+		{id: 'output-actions', label: t('rail.output'), accent: 'mint', keepWhenEmpty: true, items: buildOutputLaneItems(player, manual)},
+		{id: 'mitigation-actions', label: t('rail.mitigation'), accent: 'mint', keepWhenEmpty: true, items: buildMitigationLaneItems(mitigation, manual, simulatedMitigation)},
+		{id: 'burst-integration', label: t('rail.burst'), accent: 'orange', keepWhenEmpty: true, items: buildBurstLaneItems(burstPackages, manual)},
+		{id: 'qt-controls', label: 'QT 控制', accent: 'sky', keepWhenEmpty: true, items: buildQtLaneItems(qtSource, manual)},
+		{id: 'acr-simulated', label: t('rail.acrSim'), accent: 'sky', items: simulatedOutput.map(event => timelineItemForEvent(event, {defaultType: event.output ? 'simulated-gcd' : 'simulated-action', simulated: true}))},
+		{id: 'focus-add', label: t('rail.focusAdd'), labelHtml: renderFocusAddLabel(), accent: 'sky', keepWhenEmpty: true, items: []},
 		...focused,
 	].filter(row => row.id !== 'acr-simulated' || row.items.length)
 	let bossIndex = 0
@@ -1599,34 +2587,76 @@ function buildVisualTimelineRows(track) {
 		.map(row => row.groupId === 'boss' ? {...row, bossIndex: bossIndex++} : row)
 }
 
-function buildOutputLaneItems(player = [], qtSource = [], manual = []) {
+function buildOutputLaneItems(player = [], manual = []) {
 	const playerItems = mainActionTimelineEvents(player)
 		.filter(event => !isBurstTimelineEvent(event))
 		.map(event => timelineItemForEvent(event, {defaultType: event.potency > 0 ? 'gcd' : 'action'}))
-	const qtItems = qtSource
-		.filter(event => timelineFunctionalLane(event) === 'output')
-		.map(event => timelineItemForEvent(event, {defaultType: 'action'}))
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'output')
-	return sortTimelineItems([...playerItems, ...qtItems, ...manualItems])
+	return sortTimelineItems(uniqueTimelineDisplayEvents([...playerItems, ...manualItems]))
 }
 
-function buildMitigationLaneItems(mitigation = [], manual = [], qtSource = []) {
+function buildMitigationLaneItems(mitigation = [], manual = [], simulatedCoverage = []) {
 	const mitigationItems = mitigation
 		.filter(event => timelineFunctionalLane(event) === 'mitigation')
 		.map(event => timelineItemForEvent(event, {defaultType: 'action'}))
-	const qtItems = qtSource
+	const simulatedItems = simulatedCoverage
 		.filter(event => timelineFunctionalLane(event) === 'mitigation')
-		.map(event => timelineItemForEvent(event, {defaultType: 'action'}))
+		.map(event => timelineItemForEvent(event, {defaultType: 'action', simulated: true}))
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'mitigation')
-	return sortTimelineItems(uniqueTimelineDisplayEvents([...mitigationItems, ...qtItems, ...manualItems]))
+	const imported = filterCooldownConflictingTimelineItems(uniqueTimelineDisplayEvents([...mitigationItems, ...manualItems]))
+	return sortTimelineItems(uniqueTimelineDisplayEvents([...imported, ...simulatedItems]))
 }
 
-function buildBurstLaneItems(burstPackages = [], qtSource = [], manual = []) {
-	const qtItems = qtSource
-		.filter(event => timelineFunctionalLane(event) === 'burst')
-		.map(event => timelineItemForEvent(event, {defaultType: timelineEventType(event)}))
+function buildBurstLaneItems(burstPackages = [], manual = []) {
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'burst')
-	return sortTimelineItems([...burstPackages, ...qtItems, ...manualItems])
+	return sortTimelineItems([...burstPackages, ...manualItems])
+}
+
+function buildQtLaneItems(qtSource = [], manual = []) {
+	const qtItems = compactTimelineQtEvents(qtSource)
+		.map(event => timelineItemForEvent(event, {defaultType: 'qt'}))
+	const manualQtItems = manual
+		.filter(event => timelineFunctionalLane(event) === 'qt')
+		.map(event => timelineItemForEvent(event, {defaultType: 'qt'}))
+	return sortTimelineItems([...qtItems, ...manualQtItems])
+}
+
+function compactTimelineQtEvents(events = []) {
+	const groups = new Map()
+	for (const event of events) {
+		const key = `${timelineFunctionalLane(event)}|${qtCompactBucketMs(event)}`
+		const group = groups.get(key) ?? {startMs: Number(event.timeMs ?? event.startMs ?? 0), items: []}
+		group.items.push(event)
+		group.startMs = Math.min(group.startMs, Number(event.timeMs ?? event.startMs ?? 0))
+		groups.set(key, group)
+	}
+	return [...groups.values()].map((group, index) => {
+		const first = group.items[0] ?? {}
+		const qtStates = group.items.flatMap(item => Array.isArray(item.qtStates) && item.qtStates.length
+			? item.qtStates
+			: [{Name: item.name ?? item.label ?? 'QT', Enabled: item.enabled}])
+		const names = qtStates.map(item => `${item.Name ?? 'QT'}${item.Enabled == null ? '' : item.Enabled ? ' 开' : ' 关'}`)
+		return {
+			...first,
+			id: `qt-compact-${Math.round(group.startMs)}-${index}`,
+			type: 'qt',
+			kind: 'qt-control',
+			classification: 'qt',
+			name: 'QT',
+			label: 'QT',
+			timeMs: group.startMs,
+			startMs: group.startMs,
+			endMs: group.startMs + 2500,
+			durationMs: 2500,
+			eventCount: group.items.length,
+			qtStates,
+			qtSummary: names.join(' / '),
+		}
+	})
+}
+
+function qtCompactBucketMs(event = {}) {
+	return Math.round(Number(event.timeMs ?? event.startMs ?? 0) / 1500) * 1500
 }
 
 function timelineQtEvents(track = {}) {
@@ -1645,6 +2675,8 @@ function timelineQtEvents(track = {}) {
 		source: event.source ?? 'timeline',
 		actionId: event.actionId,
 		iconUrl: event.iconUrl ?? '',
+		qtStates: event.qtStates ?? [],
+		enabled: event.enabled,
 		phase: event.phase,
 		phaseStartMs: event.phaseStartMs,
 	}))
@@ -1656,6 +2688,7 @@ function limitVisibleTimelineRowItems(row) {
 		'output-actions': 220,
 		'mitigation-actions': 160,
 		'burst-integration': 120,
+		'qt-controls': 200,
 		'acr-simulated': 420,
 	}
 	const limit = limits[row.id]
@@ -1706,9 +2739,9 @@ function renderTimelineRow(row, maxTime, timelineWidth = 0) {
 	const items = assignTimelineLanes(row.items, {
 		durationMs: maxTime,
 		trackWidthPx: timelineWidth,
-		minVisualWidthPx: row.groupId === 'boss' ? 180 : 0,
-		minVisualGapPx: row.groupId === 'boss' ? 12 : 0,
-		laneGapMs: row.groupId === 'boss' ? 800 : 0,
+		minVisualWidthPx: row.groupId === 'boss' ? BOSS_CAST_MIN_VISUAL_WIDTH_PX : PLAYER_TIMELINE_ITEM_WIDTH_PX,
+		minVisualGapPx: row.groupId === 'boss' ? BOSS_CAST_VISUAL_GAP_PX : PLAYER_TIMELINE_ITEM_GAP_PX,
+		laneGapMs: 0,
 	})
 	const lanes = timelineLaneCount(items)
 	return `
@@ -1717,7 +2750,7 @@ function renderTimelineRow(row, maxTime, timelineWidth = 0) {
 		</div>
 		<div class="xiva-track xiva-row-track ${row.accent} ${rowClass}" style="--lane-count:${lanes}" data-row-id="${row.id}" data-drop-lane="${timelineDropLaneForRow(row)}">
 			${renderTimelineGrid(maxTime)}
-			${items.map(item => renderTimelineItem(item, maxTime, row.bossIndex)).join('')}
+			${items.map(item => renderTimelineItem(item, maxTime, row.bossIndex, timelineWidth)).join('')}
 		</div>
 	`
 }
@@ -1726,6 +2759,7 @@ function timelineDropLaneForRow(row = {}) {
 	if (row.id === 'output-actions') return 'output'
 	if (row.id === 'mitigation-actions') return 'mitigation'
 	if (row.id === 'burst-integration') return 'burst'
+	if (row.id === 'qt-controls') return 'qt'
 	return 'locked'
 }
 
@@ -1741,7 +2775,7 @@ function timelineDropLaneAtClientPoint(clientX, clientY) {
 function actionTimelineDropLane(actionId) {
 	const action = actionById(actionId)
 	const classification = classifyImportedAction(actionId, action?.name ?? '', 'player-action')
-	if (classification.type === 'mitigation' || classification.type === 'healing') {
+	if (classification.type === 'mitigation' || classification.type === 'healing' || requiresManualTargetChoice(action, classification.type)) {
 		return 'mitigation'
 	}
 	if (classification.output || classification.type === 'damage' || classification.type === 'dot' || classification.type === 'output') {
@@ -1761,6 +2795,10 @@ function canDropBurstPackageOnTimelineLane(dropLane) {
 	return dropLane === 'burst'
 }
 
+function canDropQtOnTimelineLane(dropLane) {
+	return dropLane === 'qt'
+}
+
 function canDropPotionOnTimelineLane(dropLane) {
 	return dropLane === 'burst'
 }
@@ -1775,17 +2813,133 @@ function renderTimelineRowLabel(row) {
 	return `${renderBossAvatar(row.sourceName ?? row.label, row.bossIndex)}<span class="boss-label-name">${row.label}</span>`
 }
 
+/* ============================================================
+   Timeline visibility rail — a compact vertical "eye" strip
+   that controls whole-row visibility on the main timeline.
+   Each dot maps to one row in the current phase; clicking it
+   hides/shows that row's label + track together. State lives
+   in state.hiddenTimelineRows (an array of stable row keys)
+   and survives phase switches + timeline imports.
+   ============================================================ */
+
+function currentVisualTimelineRows(model) {
+	return buildVisualTimelineRows(model.tracks.expert)
+}
+
+function timelineRowVisibilityKey(row) {
+	if (row.id) {
+		return row.id
+	}
+	return `${row.groupId ?? 'row'}:${row.label ?? ''}`
+}
+
+function isTimelineRowHidden(row) {
+	return state.hiddenTimelineRows.includes(timelineRowVisibilityKey(row))
+}
+
+function visibleTimelineRows(rows) {
+	if (!state.hiddenTimelineRows.length) {
+		return rows
+	}
+	return rows.filter(row => !isTimelineRowHidden(row))
+}
+
+function timelineRowAccentColor(row) {
+	switch (row.accent) {
+		case 'rose':
+			return 'var(--boss)'
+		case 'gold':
+			return 'var(--gold)'
+		case 'mint':
+			return 'var(--mint)'
+		case 'orange':
+			return 'var(--amber)'
+		case 'sky':
+			return 'var(--sky)'
+		case 'violet':
+			return 'var(--violet)'
+		default:
+			return 'var(--accent)'
+	}
+}
+
+function renderVisibilityEyeIcon() {
+	return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>'
+}
+
+function renderVisibilityEyeOffIcon() {
+	return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>'
+}
+
+function renderTimelineVisibilityRail(rows) {
+	const anyHidden = state.hiddenTimelineRows.length > 0
+	const eyeTitle = anyHidden ? '全部显示' : '全部隐藏'
+	const eyeIcon = anyHidden ? renderVisibilityEyeOffIcon() : renderVisibilityEyeIcon()
+	const dots = rows
+		.filter(row => row.id !== 'focus-add')
+		.map(row => {
+			const key = timelineRowVisibilityKey(row)
+			const hidden = isTimelineRowHidden(row)
+			const color = timelineRowAccentColor(row)
+			const label = row.label || row.id
+			const tooltip = hidden ? `显示 ${label}` : `隐藏 ${label}`
+			return `<button type="button" class="timeline-visibility-dot ${hidden ? 'hidden' : ''}" style="--row-color:${color}" data-action="toggle-timeline-row" data-row-key="${escapeHtml(key)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" aria-pressed="${hidden ? 'true' : 'false'}"></button>`
+		})
+		.join('')
+	return `
+		<div class="timeline-visibility-rail" aria-label="时间轴图层">
+			<button type="button" class="timeline-visibility-eye" data-action="toggle-all-timeline-rows" title="${eyeTitle}" aria-label="${eyeTitle}">${eyeIcon}</button>
+			<span class="timeline-visibility-rail-divider" aria-hidden="true"></span>
+			${dots}
+		</div>
+	`
+}
+
+function toggleTimelineRowVisibility(rowKey) {
+	if (!rowKey) {
+		return
+	}
+	const hidden = [...state.hiddenTimelineRows]
+	const index = hidden.indexOf(rowKey)
+	if (index === -1) {
+		hidden.push(rowKey)
+	} else {
+		hidden.splice(index, 1)
+	}
+	state.hiddenTimelineRows = hidden
+	saveHiddenTimelineRows()
+	render()
+}
+
+function toggleAllTimelineRowVisibility(rows) {
+	const currentKeys = rows
+		.filter(row => row.id !== 'focus-add')
+		.map(row => timelineRowVisibilityKey(row))
+	if (state.hiddenTimelineRows.length > 0) {
+		state.hiddenTimelineRows = []
+	} else {
+		state.hiddenTimelineRows = currentKeys
+	}
+	saveHiddenTimelineRows()
+	render()
+}
+
 function renderTimelineGrid(maxTime) {
 	const ticks = timelineTicks(maxTime).map(tick => `<i class="${tick.kind}" style="left:${timelinePercent(tick.ms, maxTime)}%"></i>`)
 	return `<div class="xiva-grid">${ticks.join('')}</div>`
 }
 
-function renderTimelineItem(item, maxTime, bossIndex) {
-	const itemLabel = displayNameForAction(item)
-	const timelineLabel = item.timelineLabel || (itemLabel !== item.label ? item.label : '')
-	const start = timelinePercent(item.startMs, maxTime)
-	const pointTypes = [`action`, `gcd`, `potion`, `simulated-gcd`, `simulated-action`]
-	const width = pointTypes.includes(item.type) ? null : Math.max(item.type === `cast` ? 0.8 : 0.45, timelinePercent(item.endMs, maxTime) - start)
+function renderTimelineItem(item, maxTime, bossIndex, timelineWidth = 0) {
+const itemLabel = displayNameForAction(item)
+const timelineLabel = item.timelineLabel || (itemLabel !== item.label ? item.label : '')
+const rawStart = timelinePercent(item.startMs, maxTime)
+const pointTypes = [`action`, `gcd`, `qt`, `potion`, `simulated-gcd`, `simulated-action`]
+const isPointItem = pointTypes.includes(item.type) || item.type === `focus-tracker`
+const readablePointItemWidthPx = 132
+const maxPointLeftPercent = timelineWidth > 0 ? Math.max(0, 100 - readablePointItemWidthPx / timelineWidth * 100) : 98
+const start = isPointItem ? Math.min(rawStart, maxPointLeftPercent) : rawStart
+const endPercent = timelinePercent(item.endMs, maxTime)
+const width = pointTypes.includes(item.type) ? null : Math.max(0, Math.min(Math.max(item.type === `cast` ? 0.18 : 0.45, endPercent - rawStart), 100 - start))
 	const icon = renderTimelineIcon(item, itemLabel)
 	const lane = Math.max(0, Number(item.lane ?? 0))
 	const countBadge = item.eventCount > 1 ? `<b class="item-count">x${item.eventCount}</b>` : ``
@@ -1800,7 +2954,7 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 	if (isCast) {
 		const highDamageClass = damage >= 200000 ? 'high-damage' : ''
 		const noDamageClass = damage <= 0 ? 'no-damage' : ''
-		const tooltipParts = [item.label, `${startTimeLabel}`, `${endTimeLabel}`, `${formatDamage(damage)}`]
+		const tooltipParts = [itemLabel, timelineLabel ? `\u539f\u8f74\uff1a${timelineLabel}` : '', `${startTimeLabel}`, `${endTimeLabel}`, `${formatDamage(damage)}`].filter(Boolean)
 		if (item.eventCount > 1) tooltipParts.push(`x${item.eventCount}`)
 		const tooltip = tooltipParts.join(` / `)
 		const bossColorClass = `boss-idx-${(bossIndex ?? 0) % 5}`
@@ -1808,7 +2962,7 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 			<button class="xiva-item cast ${bossColorClass} ${highDamageClass} ${noDamageClass}" style="left:${start}%; top:${bossLaneTop}; ${width == null ? `` : `width:${width}%;`}" data-boss-idx="${bossIndex ?? 0}" title="${tooltip}">
 				<span class="cast-main">
 					<b class="cast-badge">读条</b>
-					<span class="cast-name">${item.label}</span>
+					<span class="cast-name">${itemLabel}</span>
 					<strong class="item-damage">${formatDamage(damage)}</strong>
 				</span>
 				<span class="cast-meta">
@@ -1860,7 +3014,7 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 			hasMeaningfulCdAdjustment(item) ? `爆发窗口已顺延 +${formatDuration(item.cdAdjustedMs)}` : '',
 			`${item.skillCount} 个技能`,
 			item.sourceLabel,
-			editableBurstPackage ? '可拖动调整时间' : '',
+			editableBurstPackage ? t('hint.draggableTime') : '',
 		].filter(Boolean).join(' / ')
 		return `
 			<button class="xiva-item burst-package ${item.window === '120s' ? 'major' : 'minor'} ${editableBurstPackage ? 'editable' : 'locked'}" style="left:${start}%; top:calc(7px + ${lane} * 42px); ${width == null ? `` : `width:${width}%;`}" title="${tooltip}" draggable="${editableBurstPackage ? 'true' : 'false'}" ${item.manualId ? `data-manual-id="${item.manualId}"` : ''} data-source-kind="${sourceKind}" data-locate-event-key="${item.locateEventKey}">
@@ -1873,13 +3027,22 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 			</button>
 		`
 	}
+	if (item.qtSummary) {
+		const tooltip = [`QT`, startTimeLabel, item.qtSummary].filter(Boolean).join(' / ')
+		return `
+			<button class="xiva-item ${item.type} qt-group source-${sourceKind}" style="left:${start}%; top:calc(7px + ${lane} * 42px);" title="${escapeHtml(tooltip)}" data-source-kind="${sourceKind}" data-locate-event-key="${item.locateEventKey}">
+				${icon}
+				${countBadge}
+			</button>
+		`
+	}
 	const damageBadge = isDamage || damage > 0 ? `<strong class="item-damage">${formatDamage(damage)}</strong>` : ``
 	if (item.manualId) {
 		const editable = canEditTimeline()
-		const cdLabel = hasMeaningfulCdAdjustment(item) ? `队列CD调整 +${formatDuration(item.cdAdjustedMs)}` : ''
-		const tooltip = [itemLabel, timelineLabel ? `原轴：${timelineLabel}` : '', cdLabel, startTimeLabel, editable ? '可拖动调整时间' : ''].filter(Boolean).join(' / ')
+	const cdLabel = hasMeaningfulCdAdjustment(item) ? `${t('meta.queueCd')} +${formatDuration(item.cdAdjustedMs)}` : ''
+	const tooltip = [itemLabel, timelineLabel ? `${t('meta.originalAxis')}${timelineLabel}` : '', cdLabel, startTimeLabel, editable ? t('hint.draggableTime') : ''].filter(Boolean).join(' / ')
 		return `
-			<button class="xiva-item ${item.type} editable-manual source-${sourceKind} ${editable ? 'editable' : 'locked'}" style="left:${start}%; top:calc(7px + ${lane} * 42px); ${width == null ? `` : `width:${width}%;`}" title="${tooltip}" draggable="${editable ? 'true' : 'false'}" data-manual-id="${item.manualId}" data-source-kind="${sourceKind}" data-locate-event-key="${item.locateEventKey}">
+			<button class="xiva-item ${item.type} editable-manual source-${sourceKind} ${editable ? 'editable' : 'locked'}" style="left:${start}%; top:calc(7px + ${lane} * 42px); ${width == null ? `` : `width:${width}%;`}" title="${tooltip}" draggable="${editable ? 'true' : 'false'}" data-manual-id="${item.manualId}" data-source-kind="${sourceKind}" ${item.actionId ? `data-action-id="${item.actionId}"` : ''} data-locate-event-key="${item.locateEventKey}">
 				${icon}
 				<span>${itemLabel}</span>
 				<small>${startTimeLabel}</small>
@@ -1892,7 +3055,7 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 	}
 	const editableEvent = canEditTimeline() && Boolean(item.editableEventKey)
 	return `
-		<button class="xiva-item ${item.type} source-${sourceKind} ${editableEvent ? 'editable-timeline-event editable' : ''}" style="left:${start}%; top:calc(7px + ${lane} * 42px); ${width == null ? `` : `width:${width}%;`}" title="${[itemLabel, timelineLabel ? `原轴：${timelineLabel}` : '', startTimeLabel, editableEvent ? '可拖动调整时间' : ''].filter(Boolean).join(' / ')}" draggable="${editableEvent ? 'true' : 'false'}" data-source-kind="${sourceKind}" data-locate-event-key="${item.locateEventKey}" ${item.editableEventKey ? `data-timeline-event-key="${item.editableEventKey}"` : ''}>
+		<button class="xiva-item ${item.type} source-${sourceKind} ${editableEvent ? 'editable-timeline-event editable' : ''}" style="left:${start}%; top:calc(7px + ${lane} * 42px); ${width == null ? `` : `width:${width}%;`}" title="${[itemLabel, timelineLabel ? `${t('meta.originalAxis')}${timelineLabel}` : '', startTimeLabel, editableEvent ? t('hint.draggableTime') : ''].filter(Boolean).join(' / ')}" draggable="${editableEvent ? 'true' : 'false'}" data-source-kind="${sourceKind}" ${item.actionId ? `data-action-id="${item.actionId}"` : ''} data-locate-event-key="${item.locateEventKey}" ${item.editableEventKey ? `data-timeline-event-key="${item.editableEventKey}"` : ''}>
 			${icon}
 			<span>${itemLabel}</span>
 			<small class="${isDamage ? `cast-time` : ``}">${startTimeLabel}</small>
@@ -1902,6 +3065,72 @@ function renderTimelineItem(item, maxTime, bossIndex) {
 			${renderTimelineDeleteButton(item, editableEvent)}
 		</button>
 	`
+}
+
+function renderPendingTargetPickerOverlay(model) {
+	if (!canEditTimeline() || !state.pendingTargetPicker) {
+		return ''
+	}
+	const item = state.inserted.find(entry => entry.id === state.pendingTargetPicker)
+	if (!item || item.target) {
+		return ''
+	}
+	const options = targetOptionsForEvent(item).filter(option => option.value)
+	if (!options.length) {
+		return ''
+	}
+	const skillName = escapeHtml(displayNameForAction(item) || item.name || '')
+	return `
+		<div class="target-picker-popover" data-target-picker-overlay="${item.id}" role="dialog" aria-modal="false">
+			<div class="target-picker-header">
+				<strong>指定目标</strong>
+				<span class="target-picker-skill">${skillName}</span>
+				<button class="target-picker-close" data-action="close-target-picker" title="关闭" aria-label="关闭">×</button>
+			</div>
+			<div class="target-picker-options">
+				${options.map(option => `
+					<button class="target-picker-choice" data-action="choose-manual-target" data-manual-target-choice="${item.id}" data-target-value="${option.value}" title="指定给 ${escapeHtml(option.label)}">${escapeHtml(option.label)}</button>
+				`).join('')}
+			</div>
+		</div>
+	`
+}
+
+function positionTargetPickerOverlay() {
+	const overlay = document.querySelector('[data-target-picker-overlay]')
+	if (!overlay) {
+		return
+	}
+	const manualId = overlay.dataset.targetPickerOverlay
+	const skillEl = document.querySelector(`[data-manual-id="${manualId}"]`)
+	if (!skillEl) {
+		overlay.style.left = '50%'
+		overlay.style.top = '120px'
+		overlay.style.transform = 'translateX(-50%)'
+		return
+	}
+	const rect = skillEl.getBoundingClientRect()
+	const overlayWidth = overlay.offsetWidth
+	const overlayHeight = overlay.offsetHeight
+	const viewportWidth = window.innerWidth || 1280
+	const viewportHeight = window.innerHeight || 720
+	let left = rect.right + 12
+	if (left + overlayWidth > viewportWidth - 16) {
+		left = rect.left - overlayWidth - 12
+		if (left < 16) {
+			left = Math.max(16, Math.min(viewportWidth - overlayWidth - 16, rect.left))
+		}
+	}
+	let top = rect.top
+	if (top + overlayHeight > viewportHeight - 16) {
+		top = Math.max(16, viewportHeight - overlayHeight - 16)
+	}
+	if (top < 16) {
+		top = 16
+	}
+	overlay.style.left = `${Math.round(left)}px`
+	overlay.style.top = `${Math.round(top)}px`
+	overlay.style.transform = 'none'
 }
 
 function renderTimelineDeleteButton(item = {}, canDelete = false) {
@@ -1979,21 +3208,21 @@ function sourceClassForTimelineItem(item) {
 }
 
 function sourceLabelForTimelineItem(item) {
-	if (item.type === 'simulated-gcd' || item.type === 'simulated-action' || item.simulated) {
-		return 'ACR 自动'
-	}
-	if (item.type === 'mitigation') {
-		return '减伤'
-	}
-	if (item.type === 'healing') {
-		return '治疗'
-	}
-	if (item.type === 'dot') {
-		return 'DoT'
-	}
-	if (item.type === 'potion') {
-		return '爆发药'
-	}
+if (item.type === 'simulated-gcd' || item.type === 'simulated-action' || item.simulated) {
+return t('source.acr')
+}
+if (item.type === 'mitigation') {
+return t('category.mitigation')
+}
+if (item.type === 'healing') {
+return t('category.healing')
+}
+if (item.type === 'dot') {
+return 'DoT'
+}
+if (item.type === 'potion') {
+return t('category.potion')
+}
 	return ''
 }
 
@@ -2015,11 +3244,15 @@ function timelineItemForEvent(event, options = {}) {
 		output: Boolean(event.output),
 		simulated: Boolean(options.simulated ?? event.simulated),
 		durationMs,
+		recastMs: event.recastMs ?? actionById(event.actionId)?.recastMs ?? 0,
 		classification: event.classification,
 		kind: event.kind,
 		source: event.source,
 		phase: event.phase,
 		phaseStartMs: event.phaseStartMs,
+		eventCount: event.eventCount ?? 1,
+		qtStates: event.qtStates ?? [],
+		qtSummary: event.qtSummary ?? '',
 		manualId: event.manualId,
 		editableEventKey: canEditTimelineItem(event) ? timelineEventEditKey(event) : '',
 		locateEventKey: detailTimelineEventKey(event),
@@ -2238,7 +3471,7 @@ function normalizeManualQueue(events = [], baselineEvents = timelineCooldownBase
 		const recastMs = manualActionRecastMs(event, action)
 		const lockMs = manualActionQueueLockMs(event, action)
 		processBaselinesUpTo(requestedTimeMs)
-		let actualTimeMs = nextManualReadyTime({
+		const actualTimeMs = nextManualReadyTime({
 			requestedTimeMs,
 			event,
 			action,
@@ -2248,27 +3481,6 @@ function normalizeManualQueue(events = [], baselineEvents = timelineCooldownBase
 			gcdReadyMs,
 			nextReadyByKey,
 		})
-		while (baselineIndex < baselines.length && baselineConflictsWithManual(baselines[baselineIndex], {
-			actualTimeMs,
-			event,
-			action,
-			cooldownKey,
-			recastMs,
-			lockMs,
-		})) {
-			processBaseline(baselines[baselineIndex])
-			baselineIndex += 1
-			actualTimeMs = nextManualReadyTime({
-				requestedTimeMs,
-				event,
-				action,
-				cooldownKey,
-				recastMs,
-				queueReadyMs,
-				gcdReadyMs,
-				nextReadyByKey,
-			})
-		}
 		const normalized = {
 			...event,
 			timeMs: actualTimeMs,
@@ -2338,18 +3550,93 @@ function baselineConflictsWithManual(baseline = {}, manual = {}) {
 	return Boolean(manual.cooldownKey && baselineKey === manual.cooldownKey && baselineTimeMs < manual.actualTimeMs + manual.recastMs)
 }
 
+function resolveActionIdByName(name) {
+	if (!name) {
+		return null
+	}
+	const db = state.model?.skillDatabase
+	if (!db?.skills) {
+		return null
+	}
+	const match = db.skills.find(skill => skill.name === name)
+	return match?.id ?? null
+}
+
+function checkCooldownConflict(actionId, requestedTimeMs, options = {}) {
+	const action = actionById(actionId)
+	const resolvedActionId = Number(actionId) || resolveActionIdByName(action?.name)
+	if (!resolvedActionId) {
+		return {unknown: true, message: '缺少技能 ID，无法校验 CD'}
+	}
+	const cooldownKey = `action:${resolvedActionId}`
+	const recastMs = manualActionRecastMs({actionId: resolvedActionId}, action)
+	if (recastMs <= 0) {
+		return null
+	}
+	const excludeId = options.excludeId
+	const baselineEvents = timelineCooldownBaselineEvents()
+	const allEvents = [
+		...baselineEvents.map(event => ({
+			id: event.id,
+			actionId: event.actionId,
+			timeMs: Number(event.timeMs ?? event.startMs ?? 0),
+			source: event.source ?? 'import',
+			name: event.name ?? event.label ?? '',
+		})),
+		...state.inserted
+			.filter(item => item.id !== excludeId)
+			.map(item => ({
+				id: item.id,
+				actionId: item.actionId,
+				timeMs: Number(item.requestedTimeMs ?? item.timeMs ?? 0),
+				source: item.source ?? 'manual',
+				name: item.name ?? '',
+			})),
+	]
+	for (const event of allEvents) {
+		const eventAction = actionById(event.actionId)
+		const eventKey = manualCooldownKey({actionId: event.actionId}, eventAction)
+		if (eventKey !== cooldownKey) {
+			continue
+		}
+		const eventTimeMs = Number(event.timeMs)
+		if (!Number.isFinite(eventTimeMs)) {
+			continue
+		}
+		const readyAtMs = eventTimeMs + recastMs
+		if (requestedTimeMs < readyAtMs) {
+			const remainingSec = Math.ceil((readyAtMs - requestedTimeMs) / 1000)
+			return {
+				conflict: true,
+				skillName: action?.name ?? `技能 ${resolvedActionId}`,
+				lastTimeMs: eventTimeMs,
+				lastSource: event.source,
+				requestedTimeMs,
+				remainingMs: readyAtMs - requestedTimeMs,
+				readyAtMs,
+				recastMs,
+				message: `CD 冲突：${action?.name ?? `技能 ${resolvedActionId}`} 上次出现在 ${formatTime(eventTimeMs)}（${event.source}），当前 ${formatTime(requestedTimeMs)}，还差 ${remainingSec}s CD`,
+			}
+		}
+	}
+	return null
+}
+
 function timelineCooldownBaselineEvents() {
 	if (!state.model?.tracks?.expert) {
 		return []
 	}
 	const track = state.model.tracks.expert
+	const simulatedEvents = state.showAcrSimulation
+		? (track.simulated ?? state.model.acrSimulation?.events ?? [])
+		: []
 	return [
 		...mainActionTimelineEvents(track.player ?? []),
 		...(track.mitigation ?? []),
 		...timelineQtEvents(track),
 		...buildBurstPackageItems(track.burst ?? state.model.tracks.beginner?.burst ?? []),
-		...(state.showAcrSimulation ? [] : []),
-	].filter(event => (event.type === 'burst-package' || Number(event.actionId)) && !event.simulated)
+		...simulatedEvents.filter(event => Number(event.actionId) && event.kind === 'player-action'),
+	].filter(event => (event.type === 'burst-package' || Number(event.actionId)))
 }
 
 function applyCooldownUsage({
@@ -2378,27 +3665,33 @@ function isGcdAction(event = {}, action = null) {
 }
 
 function timelineFunctionalLane(event = {}) {
+	if (event.kind === 'qt-control' || event.classification === 'qt' || event.type === 'qt') {
+		return 'qt'
+	}
 	if (event.type === 'burst-package') {
 		return 'burst'
 	}
 	if (isPotionTimelineEvent(event) || isBurstTimelineEvent(event)) {
 		return 'burst'
 	}
-	if (isCoverageTimelineEvent(event) && !isOutputTimelineEvent(event)) {
+	if ((isCoverageTimelineEvent(event) || event.targetRequired) && !isOutputTimelineEvent(event)) {
 		return 'mitigation'
 	}
 	return 'output'
 }
 
 function timelineEventType(event = {}, fallbackType = 'action') {
+	if (event.kind === 'qt-control' || event.type === 'qt' || event.classification === 'qt') {
+		return 'qt'
+	}
 	if (isPotionTimelineEvent(event)) {
 		return 'potion'
 	}
 	if (isDotTimelineEvent(event)) {
 		return 'dot'
 	}
-	if (isCoverageTimelineEvent(event) && !isOutputTimelineEvent(event)) {
-		return event.classification
+	if ((isCoverageTimelineEvent(event) || event.targetRequired) && !isOutputTimelineEvent(event)) {
+		return event.classification === 'healing' ? 'healing' : 'mitigation'
 	}
 	if (isGcdAction(event, actionById(event.actionId))) {
 		return event.simulated ? 'simulated-gcd' : 'gcd'
@@ -2479,6 +3772,28 @@ function uniqueTimelineDisplayEvents(events = []) {
 	return result
 }
 
+function filterCooldownConflictingTimelineItems(events = []) {
+	const nextReadyByAction = new Map()
+	const result = []
+	const ordered = sortTimelineItems(events)
+	for (const event of ordered) {
+		const actionId = Number(event.actionId)
+		const timeMs = Number(event.startMs ?? event.timeMs ?? 0)
+		const recastMs = Number(event.recastMs ?? actionById(actionId)?.recastMs ?? 0)
+		if (!Number.isFinite(actionId) || !Number.isFinite(timeMs) || recastMs <= 0) {
+			result.push(event)
+			continue
+		}
+		const readyMs = Number(nextReadyByAction.get(actionId) ?? 0)
+		if (timeMs < readyMs) {
+			continue
+		}
+		nextReadyByAction.set(actionId, timeMs + recastMs)
+		result.push(event)
+	}
+	return result
+}
+
 function timelineDisplayEventKey(event = {}) {
 	if (event.manualId) {
 		return `manual:${event.manualId}`
@@ -2503,7 +3818,7 @@ function timelineManualItem(item, index) {
 			id,
 			manualId: id,
 			type: 'burst-package',
-			label: item.name ?? item.label ?? (item.window === '120s' ? '120 爆发包' : '60 爆发包'),
+			label: item.name ?? item.label ?? (item.window === '120s' ? '120 爆发' : '60 爆发'),
 			window: item.window,
 			startMs: item.timeMs ?? 0,
 			endMs: (item.timeMs ?? 0) + Number(item.durationMs ?? 12000),
@@ -2532,6 +3847,10 @@ function timelineManualItem(item, index) {
 		potency: item.potency ?? 0,
 		iconUrl: item.iconUrl ?? '',
 		actionId: item.actionId,
+		target: item.target,
+		targetRequired: Boolean(item.targetRequired),
+		targetMode: item.targetMode,
+		targetDataId: item.targetDataId,
 		output: Boolean(item.output),
 		classification: item.classification,
 		durationMs,
@@ -2565,7 +3884,7 @@ function manualCooldownKey(event = {}, action = null) {
 
 function manualActionRecastMs(event = {}, action = null) {
 	if (event.type === 'burst-package') {
-		return event.window === '120s' ? 120000 : 60000
+		return burstWindowForTime(event, Number(event.timeMs ?? event.startMs ?? 0), 0) === '120s' ? 120000 : 60000
 	}
 	const recastMs = Number(event.recastMs ?? action?.recastMs ?? 0)
 	if (recastMs > 0) {
@@ -2587,14 +3906,41 @@ function manualActionQueueLockMs(event = {}, action = null) {
 	return 700
 }
 
+function burstWindowForTime(burst = {}, startMs = 0, index = 0) {
+	const explicit = String(burst.window ?? '').toLowerCase()
+	if (explicit === '120s' || explicit === '120') {
+		return '120s'
+	}
+	if (explicit === '60s' || explicit === '60') {
+		return '60s'
+	}
+	const label = `${burst.name ?? ''} ${burst.label ?? ''}`
+	if (/120/.test(label)) {
+		return '120s'
+	}
+	if (/60/.test(label)) {
+		return '60s'
+	}
+	const timeMs = Number(startMs ?? burst.timeMs ?? burst.startMs)
+	if (Number.isFinite(timeMs)) {
+		return Math.round(timeMs / 60000) % 2 === 0 ? '120s' : '60s'
+	}
+	return Number(index) % 2 === 0 ? '120s' : '60s'
+}
+
+function burstLabelForWindow(window) {
+	return window === '120s' ? '120 爆发' : '60 爆发'
+}
+
 function buildBurstPackageItems(bursts = []) {
 	return bursts.map((burst, index) => {
 		const startMs = Number(burst.timeMs ?? burst.startMs ?? index * 60000)
+		const window = burstWindowForTime(burst, startMs, index)
 		return {
 			id: `burst-package-${index}`,
 			type: 'burst-package',
-			label: burst.window === '120s' ? '120 爆发包' : '60 爆发包',
-			window: burst.window ?? (startMs % 120000 === 0 ? '120s' : '60s'),
+			label: burstLabelForWindow(window),
+			window,
 			startMs,
 			endMs: startMs + Number(burst.durationMs ?? 12000),
 			timeLabel: formatTime(startMs),
@@ -2666,7 +4012,7 @@ function coverageItemType(event) {
 }
 
 function isCoverageTimelineEvent(event) {
-	return event?.classification === 'mitigation' || event?.classification === 'healing'
+	return event?.classification === 'mitigation' || event?.classification === 'healing' || Boolean(event?.targetRequired)
 }
 
 function mainActionTimelineEvents(events = []) {
@@ -2887,6 +4233,42 @@ function timelineGuideViewTimeMs(absoluteTimeMs) {
 	return Math.max(0, Number(absoluteTimeMs ?? 0) - Number(phase?.startMs ?? 0))
 }
 
+function locateDetailEventFromTimeline(eventKey) {
+	const key = String(eventKey ?? '')
+	if (!key) {
+		return
+	}
+	const section = overviewSectionForEventKey(key)
+	if (section) {
+		state.panel = 'overview'
+		if (section.id !== 'boss') {
+			state.overviewVisibleSections[section.id] = true
+		}
+		setDetailCollapseOpen(`overview-${section.id}`, true)
+		render()
+		requestAnimationFrame(() => {
+			const target = document.querySelector(`[data-detail-locate-event-key="${cssEscape(key)}"]`)
+			if (target) {
+				scrollDetailElementIntoView(target)
+				flashDetailElement(target)
+			}
+		})
+		return
+	}
+	setImportError(state.phase === 'all' ? '右侧总览里没有找到这个时间轴节点' : '当前 P 的右侧总览里没有找到这个时间轴节点')
+}
+
+function overviewSectionForEventKey(eventKey) {
+	const key = String(eventKey ?? '')
+	return overviewSections(state.model).find(section =>
+		(section.events ?? []).some(event => detailTimelineEventKey(event) === key)
+	) ?? null
+}
+
+function scrollDetailElementIntoView(target) {
+	target.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'})
+}
+
 function locateTimelineEvent(eventKey) {
 	const key = String(eventKey ?? '')
 	if (!key) {
@@ -2901,6 +4283,24 @@ function locateTimelineEvent(eventKey) {
 			return
 		}
 		setImportError('当前时间轴视图里没有找到这个技能')
+		return
+	}
+	const timeline = target.closest('.xiva-timeline')
+	if (timeline) {
+		scrollTimelineToElement(timeline, target)
+	}
+	target.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'})
+	flashTimelineElement(target)
+}
+
+function locateTimelineEventInCurrentPhase(eventKey) {
+	const key = String(eventKey ?? '')
+	if (!key) {
+		return
+	}
+	const target = document.querySelector(`[data-locate-event-key="${cssEscape(key)}"]`)
+	if (!target) {
+		setImportError(state.phase === 'all' ? '时间轴里没有找到这个技能' : '当前 P 没有这个技能')
 		return
 	}
 	const timeline = target.closest('.xiva-timeline')
@@ -2988,6 +4388,124 @@ function flashTimelineElement(target) {
 	window.setTimeout(() => target.classList.remove('timeline-locate-flash'), 2200)
 }
 
+function flashDetailElement(target) {
+	target.classList.remove('detail-locate-flash')
+	void target.offsetWidth
+	target.classList.add('detail-locate-flash')
+	window.setTimeout(() => target.classList.remove('detail-locate-flash'), 2200)
+}
+
+function flashTimelineTraceElement(target) {
+	target.classList.remove('timeline-trace-flash')
+	void target.offsetWidth
+	target.classList.add('timeline-trace-flash')
+	window.setTimeout(() => target.classList.remove('timeline-trace-flash'), 1800)
+}
+
+function flashRightSkillTraceButton(button) {
+	if (!button) {
+		return
+	}
+	const label = button.querySelector('.right-skill-state')
+	const original = label ? label.textContent : ''
+	button.classList.remove('right-skill-traced')
+	void button.offsetWidth
+	button.classList.add('right-skill-traced')
+	if (label) {
+		label.textContent = t('action.located')
+	}
+	window.setTimeout(() => {
+		button.classList.remove('right-skill-traced')
+		if (label) {
+			label.textContent = original
+		}
+	}, 1600)
+}
+
+function traceSkillOnTimeline(actionIds, sourceButton = null) {
+	const ids = Array.isArray(actionIds) ? actionIds.map(String).filter(Boolean) : [String(actionIds ?? '')].filter(Boolean)
+	if (!ids.length) {
+		setImportError('这个技能没有可定位的 ID')
+		return
+	}
+	const primaryId = ids[0]
+	state.lastTracedSkillId = primaryId
+	const timeline = document.querySelector('.xiva-timeline')
+	const selectors = ids.map(id => `[data-action-id="${cssEscape(id)}"], [data-timeline-action-id="${cssEscape(id)}"]`).join(', ')
+	const allMatches = timeline
+		? [...timeline.querySelectorAll(selectors)]
+		: [...document.querySelectorAll(`.xiva-item[data-action-id="${cssEscape(primaryId)}"]`)]
+	// Only consider items that are actually visible in the current phase view.
+	const matches = allMatches.filter(el => el.offsetParent !== null)
+	if (!matches.length) {
+		const message = state.phase === 'all'
+			? '时间轴里没有这个技能'
+			: '当前 P 没有这个技能'
+		setImportError(message)
+		return
+	}
+	const first = matches[0]
+	const matchTimeline = first.closest('.xiva-timeline')
+	if (matchTimeline) {
+		scrollTimelineToElement(matchTimeline, first)
+	}
+	first.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'})
+	for (const target of matches) {
+		flashTimelineTraceElement(target)
+	}
+	if (sourceButton) {
+		flashRightSkillTraceButton(sourceButton)
+	}
+	window.setTimeout(() => {
+		if (state.lastTracedSkillId === primaryId) {
+			state.lastTracedSkillId = null
+		}
+	}, 2000)
+}
+
+function locateOverviewSection(sectionId) {
+	const model = state.model
+	if (!model) {
+		return
+	}
+	const section = overviewSections(model).find(item => item.id === sectionId)
+	if (!section || !section.events.length) {
+		setImportError(state.phase === 'all' ? '这个分类暂无数据' : '当前 P 没有这个分类')
+		return
+	}
+	const timeline = document.querySelector('.xiva-timeline')
+	if (!timeline) {
+		return
+	}
+	const selectors = [
+		`[data-overview-section="${cssEscape(sectionId)}"]`,
+		`[data-classification="${cssEscape(sectionId)}"]`,
+		sectionId === 'boss' ? '[data-timeline-kind="boss-cast"], [data-timeline-type="cast"]' : '',
+		sectionId === 'damage' ? '[data-classification="output"], [data-classification="damage"]' : '',
+		sectionId === 'mitigation' ? '[data-classification="mitigation"], [data-classification="healing"]' : '',
+		sectionId === 'potion' ? '[data-classification="potion"], [data-kind="potion"]' : '',
+		sectionId === 'qt' ? '[data-classification="qt"], [data-kind="qt-control"], [data-type="qt"]' : '',
+		sectionId === 'opener' ? '[data-classification="opener"]' : '',
+		sectionId === 'burst' ? '[data-classification="burst"]' : '',
+	].filter(Boolean).join(', ')
+	const matches = selectors
+		? [...timeline.querySelectorAll(selectors)].filter(el => el.offsetParent !== null)
+		: []
+	if (!matches.length) {
+		setImportError(state.phase === 'all' ? '时间轴里没有这个分类' : '当前 P 没有这个分类')
+		return
+	}
+	const first = matches[0]
+	const matchTimeline = first.closest('.xiva-timeline')
+	if (matchTimeline) {
+		scrollTimelineToElement(matchTimeline, first)
+	}
+	first.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'})
+	for (const target of matches) {
+		flashTimelineTraceElement(target)
+	}
+}
+
 function cssEscape(value) {
 	return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, '\\$&')
 }
@@ -3026,6 +4544,24 @@ function loadInsertFloatPos() {
 
 function saveInsertFloatPos(pos) {
 	localStorage.setItem('webtimelineInsertFloatPos', JSON.stringify(clampInsertFloatPos(pos)))
+}
+
+const HIDDEN_TIMELINE_ROWS_STORAGE_KEY = 'webtimelineHiddenTimelineRows'
+
+function loadHiddenTimelineRows() {
+	try {
+		const saved = JSON.parse(localStorage.getItem(HIDDEN_TIMELINE_ROWS_STORAGE_KEY) ?? '[]')
+		if (!Array.isArray(saved)) {
+			return []
+		}
+		return saved.filter(item => typeof item === 'string' && item)
+	} catch {
+		return []
+	}
+}
+
+function saveHiddenTimelineRows() {
+	localStorage.setItem(HIDDEN_TIMELINE_ROWS_STORAGE_KEY, JSON.stringify(state.hiddenTimelineRows ?? []))
 }
 
 function clampInsertFloatPos(pos) {
@@ -3333,7 +4869,8 @@ function endTimelinePinch() {
 }
 
 function renderPanelTabs(model) {
-	const panels = [{id: 'overview', label: '整页总览'}, ...model.detailPanels, {id: 'qt', label: 'QT'}, {id: 'burst', label: '爆发'}]
+	const panels = [{id: 'overview', label: t('overview.title')}]
+	normalizeDetailPanelSelection()
 	return `
 		<div class="panel-tabs">
 			${panels.map(panel => `<button class="${state.panel === panel.id ? 'active' : ''}" data-panel="${panel.id}">${panel.label}</button>`).join('')}
@@ -3342,18 +4879,13 @@ function renderPanelTabs(model) {
 }
 
 function renderDetailPanel(model) {
+	normalizeDetailPanelSelection()
 	if (state.panel === 'overview') {
 		return renderOverviewPanel(model)
 	}
-	if (state.panel === 'qt') {
-		return renderQtDetailPanel()
-	}
-	if (state.panel === 'burst') {
-		return renderBurstGroupsInDetailPanel(model.tracks.expert.burst)
-	}
 	const panel = model.detailPanels.find(item => item.id === state.panel)
 	if (!panel) {
-		return '<div class="detail-list"><p class="empty-state">没有找到这个栏目。</p></div>'
+		return '<div class="detail-list"><p class="empty-state">' + t('detail.panelNotFound') + '</p></div>'
 	}
 	const events = detailPanelEvents(panel)
 	const controls = panel?.id === 'damage' ? renderOutputSimulationControl() : ''
@@ -3367,12 +4899,18 @@ function renderDetailPanel(model) {
 				controls,
 				open: isDetailCollapseOpen(panel.id),
 				body: events.length
-					? events.map((event, index) => renderDetailEventRow(panel, event, index)).join('')
-					: '<p class="empty-state">当前 P / 当前过滤条件下暂无数据</p>',
+? events.map((event, index) => renderDetailEventRow(panel, event, index)).join('')
+				: '<p class="empty-state">' + t('detail.noData') + '</p>',
 			})}
 			${renderManualEditor(panel.id)}
 		</div>
 	`
+}
+
+function normalizeDetailPanelSelection() {
+	if (state.panel !== 'overview') {
+		state.panel = 'overview'
+	}
 }
 
 function detailPanelEvents(panel) {
@@ -3395,12 +4933,27 @@ function detailPanelEvents(panel) {
 		]))
 	}
 	if (panel.id === 'opener') {
-		return detailEventsForCurrentPhase(uniqueDetailEvents([
-			...(panel.events ?? []),
-			...manualEventsForPanel('opener').map(detailManualEvent),
-		]))
+		return openerDetailEvents(panel)
 	}
 	return detailEventsForCurrentPhase(panel.events ?? [])
+}
+
+function openerDetailEvents(panel) {
+	if (!panel) {
+		return []
+	}
+	return uniqueDetailEvents([
+		...(panel.events ?? []).map(openerDetailEvent),
+		...manualEventsForPanel('opener').map(detailManualEvent).map(openerDetailEvent),
+	]).sort(compareDetailEvents)
+}
+
+function openerDetailEvent(event = {}) {
+	return {
+		...event,
+		classification: event.classification ?? 'opener',
+		opener: true,
+	}
 }
 
 function outputDetailEvents() {
@@ -3538,7 +5091,7 @@ function canEditDetailTarget(panel, event = {}) {
 }
 
 function renderDetailCollapse({id, label, count, events = [], body = '', controls = '', open = false}) {
-	const expandedBody = body || '<p class="empty-state">暂无数据</p>'
+	const expandedBody = body || `<p class="empty-state">${t('empty.noData')}</p>`
 	return `
 		<details class="detail-collapse" data-detail-collapse="${id}" ${open ? 'open' : ''}>
 			<summary>
@@ -3585,8 +5138,8 @@ function setDetailCollapseOpen(id, isOpen) {
 function renderOutputSimulationControl() {
 	return `
 		<div class="detail-sim-toggle">
-			<span>${state.showAcrSimulation ? '输出轴包含 ACR 模拟技能' : '输出轴仅显示导入 / 手动技能'}</span>
-			<button class="sim-toggle ${state.showAcrSimulation ? 'active' : ''}" data-toggle="acr-simulation">${state.showAcrSimulation ? '隐藏 ACR 模拟' : '显示 ACR 模拟'}</button>
+			<span>${state.showAcrSimulation ? t('sim.outputOn') : t('sim.outputOff')}</span>
+			<button class="sim-toggle ${state.showAcrSimulation ? 'active' : ''}" data-toggle="acr-simulation">${state.showAcrSimulation ? t('sim.hide') : t('sim.show')}</button>
 		</div>
 	`
 }
@@ -3607,16 +5160,16 @@ function detailEventTimeLabel(event = {}) {
 }
 
 function detailSourceLabel(event = {}) {
-	if (event.manualId || event.source === 'manual') {
-		return '用户手动'
-	}
-	if (event.simulated || event.source === 'KANO ACR') {
-		return 'ACR 自动'
-	}
-	if (event.source === 'timeline') {
-		return '导入时间轴'
-	}
-	return event.source
+if (event.manualId || event.source === 'manual') {
+return t('source.manual')
+}
+if (event.simulated || event.source === 'KANO ACR') {
+return t('source.acr')
+}
+if (event.source === 'timeline') {
+return t('source.timeline')
+}
+return event.source
 }
 
 function phaseRelativeMsForEvent(event = {}) {
@@ -3681,19 +5234,19 @@ function renderDetailEventRow(panel, event, index) {
 	const eventName = displayNameForAction(event)
 	const timelineLabel = event.timelineLabel || (eventName !== event.name ? event.name : '')
 	const timeLabel = detailEventTimeLabel(event)
-	const meta = [timeLabel, timelineLabel ? `原轴：${timelineLabel}` : '', event.skillType, detailSourceLabel(event), event.classification].filter(Boolean).join(' / ')
+	const meta = [timeLabel, timelineLabel ? `${t('meta.originalAxis')}${timelineLabel}` : '', event.skillType, detailSourceLabel(event), event.classification].filter(Boolean).join(' / ')
 	const canEditTime = canEditTimeline() && canEditDetailEvent(panel, event)
 	const canEditTarget = canEditTimeline() && canEditDetailTarget(panel, event)
 	const timelineEventKey = detailTimelineEventKey(event)
 	const seconds = Math.round(phaseRelativeMsForEvent(event) / 1000)
 	const timeControl = canEditTimeline()
 		? canEditTime
-			? `<label class="detail-time-field"><span>${state.phase === 'all' ? '全局秒' : `${state.phase.toUpperCase()} 秒`}</span><input type="number" min="0" max="${Math.round(currentPhaseEditWindow().durationMs / 1000)}" step="1" value="${seconds}" data-detail-time="${detailEditKey(panel, event, index)}"></label>`
-			: `<span class="detail-locked-time" title="Boss 技能默认锁定">${timeLabel}</span>`
+? `<label class="detail-time-field"><span>${state.phase === 'all' ? t('time.globalSec') : `${state.phase.toUpperCase()} ${t('time.phaseSec')}`}</span><input type="number" min="0" max="${Math.round(currentPhaseEditWindow().durationMs / 1000)}" step="1" value="${seconds}" data-detail-time="${detailEditKey(panel, event, index)}"></label>`
+: `<span class="detail-locked-time" title="${t('detail.bossLocked')}">${timeLabel}</span>`
 		: `<span class="detail-locked-time">${timeLabel}</span>`
 	const targetControl = renderDetailTargetControl(panel, event, index, canEditTarget)
 	return `
-		<div class="detail-row ${targetControl ? 'has-target-detail-row' : ''} ${canEditTime ? 'editable-detail-row' : 'locked-detail-row'}">
+		<div class="detail-row ${targetControl ? 'has-target-detail-row' : ''} ${canEditTime ? 'editable-detail-row' : 'locked-detail-row'}" data-detail-locate-event-key="${timelineEventKey}">
 			${renderIcon(eventName, event.iconUrl)}
 			<div>
 				<strong>${eventName}</strong>
@@ -3702,7 +5255,7 @@ function renderDetailEventRow(panel, event, index) {
 			${timeControl}
 			${targetControl}
 			<div class="detail-actions">
-				<button class="mini-button" data-action="locate-timeline-event" data-timeline-event-key="${timelineEventKey}" title="跳转到时间轴上的这个技能" ${timelineEventKey ? '' : 'disabled'}>追踪</button>
+				<button class="mini-button" data-action="locate-timeline-event" data-timeline-event-key="${timelineEventKey}" title="${t('detail.locateTitle')}" ${timelineEventKey ? '' : 'disabled'}>${t('action.track')}</button>
 			</div>
 		</div>
 	`
@@ -3712,15 +5265,15 @@ function renderDetailTargetControl(panel, event, index, canEditTarget) {
 	if (!shouldShowDetailTargetControl(panel, event)) {
 		return ''
 	}
-	const options = targetOptions()
+	const options = targetOptionsForEvent(event)
 		.map(option => `<option value="${option.value}" ${String(event.target ?? '') === option.value ? 'selected' : ''}>${option.label}</option>`)
 		.join('')
 	const warning = event.targetRequired && !event.target
-		? '<span class="target-required-warning">必须选择目标</span>'
+		? '<span class="target-required-warning">' + t('detail.targetRequired') + '</span>'
 		: ''
 	return `
 		<label class="detail-target-field">
-			<span>目标</span>
+			<span>${t('label.target')}</span>
 			<select data-detail-target="${detailEditKey(panel, event, index)}" ${canEditTarget ? '' : 'disabled'}>
 				${options}
 			</select>
@@ -3736,12 +5289,12 @@ function renderManualEditor(panelId = 'all') {
 		<section class="manual-editor">
 			<div class="manual-editor-heading">
 				<div>
-					<strong>手动轴编辑</strong>
-					<span>${canEdit ? '可以改时间、微调、复制或删除用户手动技能' : '浏览模式下锁定，切到编辑模式后可调整'}</span>
-				</div>
-				<small>${events.length} 项</small>
+<strong>${t('manual.title')}</strong>
+				<span>${canEdit ? t('manual.hintEdit') : t('manual.hintBrowse')}</span>
 			</div>
-			${events.length ? events.map(event => renderManualEditorRow(event, canEdit)).join('') : '<p class="empty-state">当前分类还没有手动技能，可先从上方复制或从技能列拖入。</p>'}
+			<small>${events.length} ${t('unit.items')}</small>
+			</div>
+			${events.length ? events.map(event => renderManualEditorRow(event, canEdit)).join('') : `<p class="empty-state">${t('empty.noManual')}</p>`}
 		</section>
 	`
 }
@@ -3750,8 +5303,8 @@ function renderManualEditorRow(event, canEdit) {
 	const eventName = displayNameForAction(event)
 	const timelineLabel = event.timelineLabel || (eventName !== event.name ? event.name : '')
 	const seconds = Math.round(phaseRelativeMsForEvent(event) / 1000)
-	const cdLabel = hasMeaningfulCdAdjustment(event) ? `队列已顺延 +${formatDuration(event.cdAdjustedMs)}` : ''
-	const meta = [timelineLabel ? `原轴：${timelineLabel}` : '', manualClassificationLabel(event), event.source === 'manual' ? '用户手动' : event.source, cdLabel].filter(Boolean).join(' / ')
+	const cdLabel = hasMeaningfulCdAdjustment(event) ? `${t('meta.cdAdjusted')} +${formatDuration(event.cdAdjustedMs)}` : ''
+	const meta = [timelineLabel ? `${t('meta.originalAxis')}${timelineLabel}` : '', manualClassificationLabel(event), event.source === 'manual' ? t('source.manual') : event.source, cdLabel].filter(Boolean).join(' / ')
 	return `
 		<div class="manual-edit-row">
 			${renderIcon(eventName, event.iconUrl)}
@@ -3760,14 +5313,14 @@ function renderManualEditorRow(event, canEdit) {
 				<span>${formatTime(event.timeMs ?? 0)}${meta ? ` · ${meta}` : ''}</span>
 			</div>
 			<label class="manual-time-field">
-				<span>${state.phase === 'all' ? '全局秒' : `${state.phase.toUpperCase()} 秒`}</span>
+				<span>${state.phase === 'all' ? t('time.globalSec') : `${state.phase.toUpperCase()} ${t('time.phaseSec')}`}</span>
 				<input type="number" min="0" max="1200" step="1" value="${seconds}" data-manual-time="${event.id}" ${canEdit ? '' : 'disabled'}>
 			</label>
 			<div class="manual-edit-actions">
 				<button class="mini-button" data-action="nudge-manual-skill" data-manual-id="${event.id}" data-delta-ms="-1000" ${canEdit ? '' : 'disabled'}>-1s</button>
 				<button class="mini-button" data-action="nudge-manual-skill" data-manual-id="${event.id}" data-delta-ms="1000" ${canEdit ? '' : 'disabled'}>+1s</button>
-				<button class="mini-button" data-action="duplicate-manual-skill" data-manual-id="${event.id}" ${canEdit ? '' : 'disabled'}>复制</button>
-				<button class="mini-button danger" data-action="remove-manual-skill" data-manual-id="${event.id}" ${canEdit ? '' : 'disabled'}>删除</button>
+				<button class="mini-button" data-action="duplicate-manual-skill" data-manual-id="${event.id}" ${canEdit ? '' : 'disabled'}>${t('action.duplicate')}</button>
+				<button class="mini-button danger" data-action="remove-manual-skill" data-manual-id="${event.id}" ${canEdit ? '' : 'disabled'}>${t('action.delete')}</button>
 			</div>
 		</div>
 	`
@@ -3775,17 +5328,17 @@ function renderManualEditorRow(event, canEdit) {
 
 function targetOptions() {
 	return [
-		{value: '', label: '请选择'},
-		{value: 'Target', label: 'Boss / Target'},
-		{value: 'Self', label: '自己 / Self'},
-		{value: 'TargetOfTarget', label: '目标的目标'},
-		{value: 'Party2', label: '队友 2'},
-		{value: 'Party3', label: '队友 3'},
-		{value: 'Party4', label: '队友 4'},
-		{value: 'Party5', label: '队友 5'},
-		{value: 'Party6', label: '队友 6'},
-		{value: 'Party7', label: '队友 7'},
-		{value: 'Party8', label: '队友 8'},
+		{value: '', label: t('target.placeholder')},
+		{value: 'Target', label: t('target.boss')},
+		{value: 'Self', label: t('target.self')},
+		{value: 'TargetOfTarget', label: t('target.targetOfTarget')},
+		{value: 'Party2', label: `${t('target.party')} 2`},
+		{value: 'Party3', label: `${t('target.party')} 3`},
+		{value: 'Party4', label: `${t('target.party')} 4`},
+		{value: 'Party5', label: `${t('target.party')} 5`},
+		{value: 'Party6', label: `${t('target.party')} 6`},
+		{value: 'Party7', label: `${t('target.party')} 7`},
+		{value: 'Party8', label: `${t('target.party')} 8`},
 		{value: 'PartyMember2', label: 'PartyMember2'},
 		{value: 'PartyMember3', label: 'PartyMember3'},
 		{value: 'PartyMember4', label: 'PartyMember4'},
@@ -3794,6 +5347,14 @@ function targetOptions() {
 		{value: 'PartyMember7', label: 'PartyMember7'},
 		{value: 'PartyMember8', label: 'PartyMember8'},
 	]
+}
+
+function targetOptionsForEvent(event = {}) {
+	const options = targetOptions()
+	if (event.targetRequired || requiresManualTargetChoice(actionById(event.actionId), event.classification)) {
+		return options.filter(option => option.value !== 'Target')
+	}
+	return options
 }
 
 function manualEventsForPanel(panelId) {
@@ -3817,10 +5378,10 @@ function manualEventsForPanel(panelId) {
 }
 
 function manualClassificationLabel(event) {
-	if (event.classification === 'mitigation') return '减伤'
-	if (event.classification === 'healing') return '治疗'
-	if (event.classification === 'potion') return '爆发药'
-	if (event.output || event.classification === 'damage' || event.classification === 'output') return '输出'
+if (event.classification === 'mitigation') return t('category.mitigation')
+if (event.classification === 'healing') return t('category.healing')
+if (event.classification === 'potion') return t('category.potion')
+if (event.output || event.classification === 'damage' || event.classification === 'output') return t('category.output')
 	return event.classification ?? ''
 }
 
@@ -3830,7 +5391,7 @@ function requiresManualTargetChoice(action = null, classification = '') {
 		return true
 	}
 	const text = `${action?.name ?? ''} ${action?.category ?? ''} ${action?.skillType ?? ''}`
-	return /无敌|减伤|治疗|回复|护盾|防护|铁壁|雪仇|黑盾|至黑|行尸|暗影墙|暗黑布道|献奉|神祝祷|水流幕|庇护|礼仪之铃|天赐|医济/i.test(text)
+	return /无敌|减伤|治疗|回复|护盾|防护|支援|铁壁|雪仇|黑盾|至黑|行尸|暗影墙|暗黑布道|献奉|心关|干预|神祝祷|水流幕|庇护|礼仪之铃|天赐|医济|Oblation|Intervention|Kardia/i.test(text)
 }
 
 function defaultManualTargetForAction(action = null, classification = '') {
@@ -3846,27 +5407,219 @@ function defaultManualTargetForAction(action = null, classification = '') {
 function renderOverviewPanel(model) {
 	const sections = overviewSections(model)
 	return `
-		<div class="detail-list overview-panel">
-			<h3>整页总览</h3>
-			<div class="overview-grid">
-				${sections.map(section => `
-					<article class="overview-section">
-						${renderDetailCollapse({
-							id: `overview-${section.id}`,
-							label: section.label,
-							count: section.events.length,
-							events: section.events,
-							controls: section.id === 'damage' ? renderOutputSimulationControl() : '',
-							open: isDetailCollapseOpen(`overview-${section.id}`),
-							body: section.events.length
-								? section.events.map((event, index) => renderDetailEventRow(section, event, index)).join('')
-								: '<p class="empty-state">暂无数据</p>',
-						})}
-					</article>
-				`).join('')}
+		<div class="detail-list overview-panel right-workbench">
+			<section class="right-card right-overview-card">
+				<div class="overview-header">
+					<h3>${t('overview.title')}</h3>
+					<button class="overview-sim-toggle ${state.showAcrSimulation ? 'active' : ''}" data-toggle="acr-simulation">${state.showAcrSimulation ? t('sim.hide') : t('sim.show')}</button>
+				</div>
+				${renderOverviewSectionToggles()}
+			</section>
+			<div class="overview-list">
+				${sections.map(section => renderOverviewSection(section)).join('')}
 			</div>
 		</div>
 	`
+}
+
+function renderOverviewSection(section) {
+	const open = isDetailCollapseOpen(`overview-${section.id}`)
+	const eventCount = section.events.length
+	const chevronSvg = open
+		? '<svg class="overview-chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
+		: '<svg class="overview-chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
+	return `
+		<div class="overview-section-wrapper${open ? ' expanded' : ''}">
+			<button class="overview-row" data-overview-expand="${section.id}" title="${t('hint.traceSkill')}">
+				<div class="overview-row-text">
+					<strong>${section.label}</strong>
+					<small>${overviewSectionSubtitle(section.id)}</small>
+				</div>
+				<span class="overview-row-count">${eventCount}</span>
+				<span class="overview-row-chevron">${chevronSvg}</span>
+			</button>
+			${open ? renderOverviewExpandedList(section) : ''}
+		</div>
+	`
+}
+
+function renderOverviewExpandedList(section) {
+	const events = section.events
+	if (!events.length) {
+		return `<div class="overview-expanded-list"><p class="overview-empty-state">${state.phase === 'all' ? t('empty.noData') : '当前 P 暂无数据'}</p></div>`
+	}
+	const rows = events.map((event, index) => {
+		const eventName = displayNameForAction(event)
+		const timeLabel = detailEventTimeLabel(event)
+		const sourceLabel = detailSourceLabel(event)
+		const targetLabel = event.target ? ` / ${event.target}` : ''
+		const eventKey = detailTimelineEventKey(event)
+		return `
+			<button class="overview-event-row" data-overview-locate-event="${escapeHtml(eventKey)}" title="${t('hint.traceSkill')}">
+				${renderIcon(eventName, event.iconUrl)}
+				<div class="overview-event-info">
+					<strong>${escapeHtml(eventName)}</strong>
+					<small>${escapeHtml(timeLabel)} / ${escapeHtml(sourceLabel)}${escapeHtml(targetLabel)}</small>
+				</div>
+			</button>
+		`
+	}).join('')
+	return `<div class="overview-expanded-list">${rows}</div>`
+}
+
+function renderOverviewSectionToggles() {
+	return `
+		<div class="overview-section-toggles" aria-label="${t('overview.ariaToggles')}">
+			${OVERVIEW_SECTION_TOGGLES.map(item => `
+				<label class="overview-section-toggle ${overviewSectionVisible(item.id) ? 'active' : ''}">
+					<input type="checkbox" data-overview-section-toggle="${item.id}" ${overviewSectionVisible(item.id) ? 'checked' : ''}>
+					<span>${t(item.labelKey, item.label)}</span>
+				</label>
+			`).join('')}
+		</div>
+	`
+}
+
+function renderRightSkillLibrary(track) {
+	const groups = rightSkillGroups(insertSkillGroups(track))
+		.filter(group => Array.isArray(group.skills) && group.skills.length > 0)
+	if (!groups.length) {
+		return ''
+	}
+	if (!groups.some(group => group.id === state.rightSkillCategory)) {
+		state.rightSkillCategory = groups[0].id
+	}
+	const activeGroup = groups.find(group => group.id === state.rightSkillCategory) ?? groups[0]
+	const skills = activeGroup.skills.slice(0, 8)
+	return `
+		<section class="right-card right-skill-library">
+			<div class="insert-category-tabs right-category-tabs">
+				${groups.map(group => `<button class="${group.id === activeGroup.id ? 'active' : ''}" data-right-skill-category="${group.id}">${group.label}<small>${group.skills.length}</small></button>`).join('')}
+			</div>
+			<div class="right-skill-list">
+				${skills.map(event => renderRightSkillItem(event, activeGroup.id)).join('')}
+			</div>
+		</section>
+	`
+}
+
+function rightSkillGroups(groups) {
+	const overviewGroupIds = {
+		damage: 'output',
+		mitigation: 'mitigation',
+		potion: 'potion',
+		qt: 'qt',
+		burst: 'burst',
+	}
+	const hiddenGroups = new Set(
+		Object.entries(overviewGroupIds)
+			.filter(([overviewId]) => overviewSectionVisible(overviewId))
+			.map(([, groupId]) => groupId)
+	)
+	return groups.filter(group => group.id !== 'all' && !hiddenGroups.has(group.id))
+}
+
+function renderRightSkillItem(event, activeGroupId = 'all') {
+	if (event.type === 'burst-insert') {
+		return renderRightBurstItem(event)
+	}
+	if (event.type === 'potion-insert') {
+		return renderRightPotionItem(event)
+	}
+	if (event.type === 'qt-insert') {
+		return renderRightQtItem(event)
+	}
+	const actionId = String(event.actionId ?? '')
+	const tagName = actionId ? 'button' : 'div'
+	const typeAttr = actionId ? ' type="button"' : ''
+	const relatedIds = Array.isArray(event.relatedActionIds) && event.relatedActionIds.length
+		? event.relatedActionIds
+		: (actionId ? [actionId] : [])
+	const traceIdsAttr = relatedIds.length
+		? ` data-action="trace-skill-on-timeline" data-trace-skill-id="${escapeHtml(actionId || relatedIds[0])}" data-trace-skill-ids="${escapeHtml(relatedIds.join(','))}"`
+		: ''
+	const occurrences = Number(event.occurrenceCount ?? 1)
+	const countBadge = occurrences > 1 ? `<b class="right-skill-count">x${occurrences}</b>` : ''
+	const titleParts = [actionId ? t('hint.traceSkill') : t('hint.noTrackableId')]
+	if (relatedIds.length > 1) {
+		titleParts.push(`ID: ${relatedIds.join(', ')}`)
+	}
+	return `
+		<${tagName} class="right-skill-item"${typeAttr}${traceIdsAttr} data-skill-source="${event.sidebarType}" title="${escapeHtml(titleParts.join(' / '))}">
+			${renderIcon(event.name, event.iconUrl)}
+			<div>
+				<strong>${escapeHtml(event.name)}</strong>
+				<small>${escapeHtml(insertSkillCardMeta(event))}</small>
+			</div>
+			${countBadge}
+			<em class="right-skill-state">${t('action.trace')}</em>
+		</${tagName}>
+	`
+}
+
+function renderRightBurstItem(event) {
+	const count = burstInsertSkillNames(event).length
+	const window = burstWindowForTime(event, Number(event.timeMs ?? event.startMs ?? 0), 0)
+	return `
+		<div class="right-skill-item burst passive">
+			<span class="skill-icon fallback">${window === '120s' ? '120' : '60'}</span>
+			<div>
+				<strong>${escapeHtml(event.name ?? burstLabelForWindow(window))}</strong>
+<small>${formatTime(event.timeMs)} / ${count} ${t('unit.items')}</small>
+		</div>
+		<em class="right-skill-state">${t('action.browse')}</em>
+		</div>
+	`
+}
+
+function renderRightPotionItem(event) {
+	return `
+		<div class="right-skill-item potion passive">
+			<span class="skill-icon fallback potion-icon">${escapeHtml(potionAttributeLabel(event.attributeId))}</span>
+			<div>
+				<strong>${escapeHtml(event.label)}</strong>
+<small>${escapeHtml(event.familyLabel)} / Lv.${event.level}</small>
+		</div>
+		<em class="right-skill-state">${t('action.browse')}</em>
+		</div>
+	`
+}
+
+function renderRightQtItem(event) {
+	return `
+		<div class="right-skill-item qt passive">
+			<span class="skill-icon fallback qt-fallback">QT</span>
+			<div>
+				<strong>${escapeHtml(event.name)}</strong>
+<small>${qtDraftEnabledFor(event) ? t('qt.on') : t('qt.off')} / ${formatTime(event.timeMs)}</small>
+		</div>
+		<em class="right-skill-state">${t('action.browse')}</em>
+		</div>
+	`
+}
+
+function overviewSectionVisible(id) {
+return state.overviewVisibleSections[id] !== false
+}
+
+function overviewSectionSubtitle(id) {
+	const phaseLabel = state.phase === 'all' ? t('phase.all') : state.phase.toUpperCase()
+	if (id === 'boss') return `${phaseLabel} ${t('overview.boss')}`
+	if (id === 'mitigation') return `${phaseLabel} ${t('overview.mitigation')}`
+	if (id === 'damage') return `${phaseLabel} ${t('overview.damage')}`
+	if (id === 'potion') return `${phaseLabel} ${t('overview.potion')}`
+	if (id === 'opener') return `${phaseLabel} ${t('overview.opener')}`
+	if (id === 'qt') return `${phaseLabel} ${t('overview.qt')}`
+	if (id === 'burst') return `${phaseLabel} ${t('overview.burst')}`
+	return ''
+}
+
+function toggleOverviewSection(id, visible = null) {
+	if (!OVERVIEW_SECTION_TOGGLES.some(item => item.id === id)) {
+		return
+	}
+	state.overviewVisibleSections[id] = visible == null ? !overviewSectionVisible(id) : Boolean(visible)
+	render()
 }
 
 function overviewSections(model) {
@@ -3874,18 +5627,22 @@ function overviewSections(model) {
 	const mitigationPanel = model.detailPanels.find(panel => panel.id === 'mitigation')
 	const potionPanel = model.detailPanels.find(panel => panel.id === 'potion')
 	const openerPanel = model.detailPanels.find(panel => panel.id === 'opener')
-	return [
-		{id: 'boss', label: 'Boss 读条', events: detailEventsForCurrentPhase(bossEvents)},
-		{id: 'mitigation', label: '减伤 / 奶轴', events: detailPanelEvents(mitigationPanel)},
-		{id: 'damage', label: '输出轴', events: detailEventsForCurrentPhase(outputDetailEvents())},
-		{id: 'potion', label: '爆发药轴', events: detailPanelEvents(potionPanel)},
-		{id: 'opener', label: '起手', events: detailPanelEvents(openerPanel)},
+	const burstEvents = detailEventsForCurrentPhase(buildBurstPackageItems(model.tracks.expert.burst ?? []))
+	const sections = [
+		{id: 'boss', label: t('overview.boss'), events: detailEventsForCurrentPhase(bossEvents)},
+		{id: 'mitigation', label: t('overview.mitigation'), events: detailPanelEvents(mitigationPanel)},
+		{id: 'damage', label: t('overview.damage'), events: detailEventsForCurrentPhase(outputDetailEvents())},
+		{id: 'potion', label: t('overview.potion'), events: detailPanelEvents(potionPanel)},
+		{id: 'opener', label: t('overview.opener'), events: openerDetailEvents(openerPanel)},
+		{id: 'qt', label: t('overview.qt'), events: detailEventsForCurrentPhase(qtDetailEvents())},
+		{id: 'burst', label: t('overview.burst'), events: burstEvents},
 	]
+	return sections.filter(section => overviewSectionVisible(section.id))
 }
 
 function renderBurstGroupsInDetailPanel(bursts) {
 	const burstEvents = detailEventsForCurrentPhase(buildBurstPackageItems(bursts))
-	const panel = virtualDetailPanel('burst', '爆发', burstEvents)
+	const panel = virtualDetailPanel('burst', t('overview.burst'), burstEvents)
 	return `
 		<div class="detail-list burst-detail-list">
 			${renderDetailCollapse({
@@ -3895,8 +5652,8 @@ function renderBurstGroupsInDetailPanel(bursts) {
 				events: burstEvents,
 				open: isDetailCollapseOpen('burst'),
 				body: burstEvents.length
-					? burstEvents.map((event, index) => renderDetailEventRow(panel, event, index)).join('')
-					: '<p class="empty-state">当前 P / 当前过滤条件下暂无爆发数据</p>',
+? burstEvents.map((event, index) => renderDetailEventRow(panel, event, index)).join('')
+				: `<p class="empty-state">${t('empty.noBurstData')}</p>`
 			})}
 		</div>
 	`
@@ -3904,7 +5661,7 @@ function renderBurstGroupsInDetailPanel(bursts) {
 
 function renderQtDetailPanel() {
 	const events = detailEventsForCurrentPhase(qtDetailEvents())
-	const panel = virtualDetailPanel('qt', 'QT 控制', events)
+	const panel = virtualDetailPanel('qt', t('detail.qtControl'), events)
 	return `
 		<div class="detail-list qt-detail-list">
 			${renderDetailCollapse({
@@ -3915,7 +5672,7 @@ function renderQtDetailPanel() {
 				open: isDetailCollapseOpen('qt'),
 				body: events.length
 					? events.map((event, index) => renderDetailEventRow(panel, event, index)).join('')
-					: '<p class="empty-state">当前 P / 当前过滤条件下暂无 QT 节点</p>',
+					: `<p class="empty-state">${t('empty.noQtBurst')}</p>`,
 			})}
 			${renderManualEditor('qt')}
 		</div>
@@ -3968,27 +5725,27 @@ function renderFocusSkillModal(model) {
 			<section class="modal-panel focus-skill-modal">
 				<div class="modal-header">
 					<div>
-						<p class="eyebrow">技能追踪器</p>
-						<h3>${selectedJob?.name ?? state.job} 关注技能</h3>
-						<p class="focus-tracker-help">追踪当前职业的任意技能，显示出现次数、时间点和来源。</p>
-					</div>
-					<button class="mini-button" data-action="close-focus-picker">关闭</button>
+<p class="eyebrow">${t('focus.eyebrow')}</p>
+					<h3>${selectedJob?.name ?? state.job} ${t('action.addFocus')}</h3>
+					<p class="focus-tracker-help">${t('focus.help')}</p>
 				</div>
-				<input class="modal-search" data-field="focus-query" value="${escapeHtml(state.focusQuery)}" placeholder="搜索技能名或技能 ID">
+				<button class="mini-button" data-action="close-focus-picker">${t('action.close')}</button>
+			</div>
+			<input class="modal-search" data-field="focus-query" value="${escapeHtml(state.focusQuery)}" placeholder="${t('focus.searchPlaceholder')}">
 				${renderFocusSkillSection({
 					id: 'current-job',
-					title: '当前职业技能',
-					description: `${selectedJob?.name ?? state.job} 与通用职业技能`,
+title: t('focus.currentJob'),
+				description: `${selectedJob?.name ?? state.job} ${t('focus.currentJob')}`,
 					skills: groups.current,
 					open: true,
 				})}
 				<details class="focus-skill-section other-skills">
 					<summary>
 						<span>
-							<strong>其他技能</strong>
-							<small>其他职业、导入轴里出现过的技能，默认收起</small>
+							<strong>${t('focus.other')}</strong>
+							<small>${t('focus.otherDesc')}</small>
 						</span>
-						<em>${groups.other.length} 个</em>
+						<em>${groups.other.length} ${t('focus.countSuffix')}</em>
 					</summary>
 					${renderFocusSkillGrid(groups.other, 'other-skills')}
 				</details>
@@ -4005,7 +5762,7 @@ function renderFocusSkillSection({id, title, description, skills}) {
 					<strong>${title}</strong>
 					<small>${description}</small>
 				</span>
-				<em>${skills.length} 个</em>
+				<em>${skills.length} ${t('focus.countSuffix')}</em>
 			</div>
 			${renderFocusSkillGrid(skills, id)}
 		</section>
@@ -4015,7 +5772,7 @@ function renderFocusSkillSection({id, title, description, skills}) {
 function renderFocusSkillGrid(skills, sectionId) {
 	return `
 		<div class="focus-skill-grid" data-focus-section="${sectionId}">
-			${skills.map(skill => renderFocusSkillOption(skill)).join('') || '<p class="empty-state">没有找到技能</p>'}
+			${skills.map(skill => renderFocusSkillOption(skill)).join('') || `<p class="empty-state">${t('empty.noSkill')}</p>`}
 		</div>
 	`
 }
@@ -4028,54 +5785,52 @@ function renderFocusSkillOption(skill) {
 			${renderIcon(skill.name, skill.iconUrl)}
 			<span>
 				<strong>${skill.name}</strong>
-				<small>${skill.id} / ${skill.jobName || skill.job || '通用'} / 本轴 ${occurrences.length} 次</small>
+				<small>${skill.id} / ${skill.jobName || skill.job || t('focus.universal')} / ${t('focus.occurrences')} ${occurrences.length} ${t('focus.timesSuffix')}</small>
 			</span>
-			<em>${tracked ? '已追踪' : '+'}</em>
+			<em>${tracked ? t('action.tracked') : '+'}</em>
 		</button>
 	`
 }
 
 function renderInsertTool() {
 	return `
-		<div class="insert-tool compact">
-			<div class="insert-row">
-				<input data-field="skill-id" value="${escapeHtml(state.insertSkillId)}" placeholder="技能 ID">
-				<span class="insert-id-preview" data-insert-id-preview>${escapeHtml(insertIdPreviewName())}</span>
-				<button class="primary" data-action="insert-skill">插入</button>
-			</div>
+		<div class="insert-tool compact insert-command-bar">
+			<input data-field="skill-id" value="${escapeHtml(state.insertSkillId)}" placeholder="${t('insert.skillIdPlaceholder')}" aria-label="${t('insert.skillIdPlaceholder')}">
+			<span class="insert-id-preview" data-insert-id-preview>${escapeHtml(insertIdPreviewName())}</span>
+			<button class="primary insert-command-submit" data-action="insert-skill"><span aria-hidden="true">↵</span>${t('action.insert')}</button>
 		</div>
 	`
 }
 
 function renderToolPanel(model) {
 	return `
-		<section class="tool-panel" aria-label="工具">
+		<section class="tool-panel" aria-label="${t('tool.eyebrow')}">
 			<div class="section-heading tool-heading">
 				<div>
-					<p class="eyebrow">工具</p>
-					<h3>模拟估值 / FFLogs 对比</h3>
+					<p class="eyebrow">${t('tool.eyebrow')}</p>
+					<h3>${t('tool.title')}</h3>
 				</div>
-				<span class="status-pill">妖星首版</span>
+				<span class="status-pill">${t('tool.statusPill')}</span>
 			</div>
 			${renderFflogsComparisonPanel(model)}
 			<div class="tool-grid">
 			<section class="sim-panel">
 				<div class="section-heading">
 					<div>
-						<p class="eyebrow">伤害模拟计算</p>
-						<h3>分 P 与整体估值</h3>
-					</div>
-					<select data-field="luck">
-						<option value="average" ${state.luck === 'average' ? 'selected' : ''}>平均</option>
-						<option value="lucky" ${state.luck === 'lucky' ? 'selected' : ''}>好运直暴</option>
-						<option value="low" ${state.luck === 'low' ? 'selected' : ''}>保守</option>
-					</select>
+<p class="eyebrow">${t('tool.simEyebrow')}</p>
+					<h3>${t('tool.simTitle')}</h3>
 				</div>
-				<label class="slider">暴击概率 <input data-field="critRate" type="range" min="0" max="60" value="${state.critRate}"><span>${state.critRate}%</span></label>
-				<label class="slider">直击概率 <input data-field="directRate" type="range" min="0" max="60" value="${state.directRate}"><span>${state.directRate}%</span></label>
+				<select data-field="luck">
+					<option value="average" ${state.luck === 'average' ? 'selected' : ''}>${t('tool.luckAverage')}</option>
+					<option value="lucky" ${state.luck === 'lucky' ? 'selected' : ''}>${t('tool.luckLucky')}</option>
+					<option value="low" ${state.luck === 'low' ? 'selected' : ''}>${t('tool.luckLow')}</option>
+				</select>
+			</div>
+			<label class="slider">${t('tool.critRate')} <input data-field="critRate" type="range" min="0" max="60" value="${state.critRate}"><span>${state.critRate}%</span></label>
+			<label class="slider">${t('tool.directRate')} <input data-field="directRate" type="range" min="0" max="60" value="${state.directRate}"><span>${state.directRate}%</span></label>
 				<div class="damage-total" data-damage-total>--</div>
 				<div class="phase-damage" data-phase-damage></div>
-				<p class="hint">可与当前 ACT log、FFLogs 榜一轴和导入轴做模拟对比。</p>
+				<p class="hint">${t('tool.simHint')}</p>
 			</section>
 			</div>
 		</section>
@@ -4088,18 +5843,18 @@ function renderFflogsComparisonPanel(model) {
 		<section class="fflogs-panel">
 			<div class="section-heading">
 				<div>
-					<p class="eyebrow">FFLogs 对比模式</p>
-					<h3>当前轴 vs 日志实战轴</h3>
+					<p class="eyebrow">${t('fflogs.eyebrow')}</p>
+					<h3>${t('fflogs.title')}</h3>
 				</div>
-				<span class="status-pill">${comparison ? '已解析' : '待导入'}</span>
+				<span class="status-pill">${comparison ? t('fflogs.statusParsed') : t('fflogs.statusPending')}</span>
 			</div>
 			<div class="fflogs-import-row">
-				<input data-field="fflogs-url" value="${escapeHtml(state.fflogsUrl)}" placeholder="粘贴 FFLogs report 链接">
-				<button class="primary" data-action="load-fflogs-comparison">${state.fflogsStatus ? '解析中' : '解析 FFLogs'}</button>
+				<input data-field="fflogs-url" value="${escapeHtml(state.fflogsUrl)}" placeholder="${t('fflogs.placeholder')}">
+				<button class="primary" data-action="load-fflogs-comparison">${state.fflogsStatus ? t('fflogs.parsing') : t('fflogs.parse')}</button>
 			</div>
 			${state.fflogsStatus ? `<p class="hint">${escapeHtml(state.fflogsStatus)}</p>` : ''}
 			${state.fflogsError ? `<p class="import-feedback error">${escapeHtml(state.fflogsError)}</p>` : ''}
-			${comparison ? renderFflogsComparisonResult(comparison, model) : '<p class="hint">导入链接后会自动匹配当前职业，解析本地缓存事件，并对比伤害、技能数、GCD 利用率和治疗量。</p>'}
+			${comparison ? renderFflogsComparisonResult(comparison, model) : `<p class="hint">${t('fflogs.hint')}</p>`}
 		</section>
 	`
 }
@@ -4112,25 +5867,25 @@ function renderFflogsComparisonResult(comparison, model) {
 			<span>${escapeHtml(comparison.source?.encounterName || model.encounter.name)}</span>
 			<span>${escapeHtml(comparison.source?.sourceLog || state.fflogsUrl)}</span>
 			<label>
-				<span>角色</span>
+				<span>${t('fflogs.actor')}</span>
 				<select data-field="fflogs-actor">
-					${actors.map(actor => `<option value="${actor.id}" ${Number(actor.id) === Number(selectedActor.id) ? 'selected' : ''}>${escapeHtml(actor.name)} / ${escapeHtml(actor.job || '未知')} / ${formatDamage(actor.damage)}</option>`).join('')}
+					${actors.map(actor => `<option value="${actor.id}" ${Number(actor.id) === Number(selectedActor.id) ? 'selected' : ''}>${escapeHtml(actor.name)} / ${escapeHtml(actor.job || t('fflogs.unknownJob'))} / ${formatDamage(actor.damage)}</option>`).join('')}
 				</select>
 			</label>
 		</div>
 		<div class="fflogs-metric-grid">
-			${renderCompareMetric('伤害', comparison.simulated.damage.total, comparison.log.damage.total, comparison.deltas.damage.total, comparison.deltas.damage.percent, 'damage', renderDamageAdjustmentBreakdown(comparison))}
-			${renderCompareMetric('全部技能数', comparison.simulated.skillCounts.total, comparison.log.skillCounts.total, comparison.deltas.skillCounts.total, null, 'count', renderSkillCountBreakdown(comparison))}
-			${renderCompareMetric('GCD 利用率', comparison.simulated.gcdUtilization.percent, comparison.log.gcdUtilization.percent, comparison.deltas.gcdUtilization.points, null, 'percent', renderGcdUtilizationControl(comparison))}
-			${renderCompareMetric('治疗量', comparison.simulated.healing.total, comparison.log.healing.total, comparison.deltas.healing.total, comparison.deltas.healing.percent, 'damage')}
+			${renderCompareMetric(t('fflogs.metric.damage'), comparison.simulated.damage.total, comparison.log.damage.total, comparison.deltas.damage.total, comparison.deltas.damage.percent, 'damage', renderDamageAdjustmentBreakdown(comparison))}
+			${renderCompareMetric(t('fflogs.metric.skills'), comparison.simulated.skillCounts.total, comparison.log.skillCounts.total, comparison.deltas.skillCounts.total, null, 'count', renderSkillCountBreakdown(comparison))}
+			${renderCompareMetric(t('fflogs.metric.gcd'), comparison.simulated.gcdUtilization.percent, comparison.log.gcdUtilization.percent, comparison.deltas.gcdUtilization.points, null, 'percent', renderGcdUtilizationControl(comparison))}
+			${renderCompareMetric(t('fflogs.metric.healing'), comparison.simulated.healing.total, comparison.log.healing.total, comparison.deltas.healing.total, comparison.deltas.healing.percent, 'damage')}
 		</div>
 		<div class="fflogs-detail-grid">
 			<section>
-				<h4>分 P 伤害</h4>
+				<h4>${t('fflogs.section.phaseDamage')}</h4>
 				${renderPhaseCompareTable(comparison)}
 			</section>
 			<section>
-				<h4>技能数量差异</h4>
+				<h4>${t('fflogs.section.skillDiff')}</h4>
 				${renderSkillCompareTable(comparison.skillRows ?? [])}
 			</section>
 		</div>
@@ -4177,15 +5932,15 @@ function renderGcdUtilizationControl(comparison) {
 	return `
 		<div class="gcd-utilization-control">
 			<label>
-				<span>模拟利用率</span>
+				<span>${t('fflogs.gcdLabel')}</span>
 				<input data-field="fflogs-gcd-utilization" type="range" min="50" max="100" step="0.1" value="${formatNumber(target, 1)}">
 				<strong>${formatNumber(target, 1)}%</strong>
 			</label>
 			<div class="gcd-utilization-actions">
-				<button class="mini-button" data-action="apply-log-gcd-utilization">套用日志 ${formatNumber(logPercent, 1)}%</button>
-				<button class="mini-button" data-action="reset-gcd-utilization">重置 100%</button>
+				<button class="mini-button" data-action="apply-log-gcd-utilization">${t('fflogs.applyLog')} ${formatNumber(logPercent, 1)}%</button>
+				<button class="mini-button" data-action="reset-gcd-utilization">${t('fflogs.reset')}</button>
 			</div>
-			<span>原始模拟 ${formatNumber(actual, 1)}% / 目标差 ${formatSignedNumber(targetDiff, 1)}pt</span>
+			<span>${t('fflogs.gcdInfo')} ${formatNumber(actual, 1)}% / ${t('fflogs.gcdTargetDiff')} ${formatSignedNumber(targetDiff, 1)}pt</span>
 		</div>
 	`
 }
@@ -4202,11 +5957,11 @@ function renderCompareMetric(label, simulated, logValue, delta, deltaPercent, ty
 			<span>${label}</span>
 			<div>
 				<strong>${formatMetricValue(simulated, type)}</strong>
-				<small>模拟</small>
+				<small>${t('fflogs.sim')}</small>
 			</div>
 			<div>
 				<strong>${formatMetricValue(logValue, type)}</strong>
-				<small>日志</small>
+				<small>${t('fflogs.log')}</small>
 			</div>
 			<em class="${deltaClass}">${deltaLabel}</em>
 			${detail}
@@ -4220,8 +5975,8 @@ function renderSkillCountBreakdown(comparison) {
 	const deltas = comparison.deltas?.skillCounts ?? {}
 	return `
 		<div class="fflogs-metric-detail">
-			<span>动作 ${formatMetricValue(simulated.actions, 'count')} / ${formatMetricValue(logValue.actions, 'count')} <b class="${Number(deltas.actions ?? 0) >= 0 ? 'positive' : 'negative'}">${formatSignedInteger(deltas.actions ?? 0)}</b></span>
-			<span>自动攻击 ${formatMetricValue(simulated.auto, 'count')} / ${formatMetricValue(logValue.auto, 'count')} <b class="${Number(deltas.auto ?? 0) >= 0 ? 'positive' : 'negative'}">${formatSignedInteger(deltas.auto ?? 0)}</b></span>
+			<span>${t('fflogs.metric.actions')} ${formatMetricValue(simulated.actions, 'count')} / ${formatMetricValue(logValue.actions, 'count')} <b class="${Number(deltas.actions ?? 0) >= 0 ? 'positive' : 'negative'}">${formatSignedInteger(deltas.actions ?? 0)}</b></span>
+			<span>${t('fflogs.metric.autoAttack')} ${formatMetricValue(simulated.auto, 'count')} / ${formatMetricValue(logValue.auto, 'count')} <b class="${Number(deltas.auto ?? 0) >= 0 ? 'positive' : 'negative'}">${formatSignedInteger(deltas.auto ?? 0)}</b></span>
 		</div>
 	`
 }
@@ -4233,7 +5988,7 @@ function renderPhaseCompareTable(comparison) {
 	])]
 	return `
 		<div class="compare-table">
-			<div class="compare-row header"><span>P</span><span>模拟</span><span>日志</span><span>差值</span></div>
+			<div class="compare-row header"><span>${t('fflogs.tableHeader.phase')}</span><span>${t('fflogs.tableHeader.simulated')}</span><span>${t('fflogs.tableHeader.log')}</span><span>${t('fflogs.tableHeader.delta')}</span></div>
 			${phaseKeys.map(phase => {
 				const simulated = Number(comparison.simulated.damage.phases?.[phase]?.damage ?? 0)
 				const logValue = Number(comparison.log.damage.phases?.[phase]?.damage ?? 0)
@@ -4246,7 +6001,7 @@ function renderPhaseCompareTable(comparison) {
 function renderSkillCompareTable(rows) {
 	return `
 		<div class="compare-table skill-table">
-			<div class="compare-row header"><span>技能</span><span>模拟</span><span>日志</span><span>差值</span></div>
+			<div class="compare-row header"><span>${t('fflogs.tableHeader.skill')}</span><span>${t('fflogs.tableHeader.simulated')}</span><span>${t('fflogs.tableHeader.log')}</span><span>${t('fflogs.tableHeader.delta')}</span></div>
 			${rows.slice(0, 18).map(row => `<div class="compare-row"><span>${escapeHtml(row.actionName || `技能 ${row.actionId}`)}</span><span>${row.simulatedCount}</span><span>${row.logCount}</span><span class="${row.delta >= 0 ? 'positive' : 'negative'}">${formatSignedInteger(row.delta)}</span></div>`).join('')}
 		</div>
 	`
@@ -4265,46 +6020,104 @@ function renderAcrModal(model) {
 		return ''
 	}
 	const generatedAt = formatGeneratedAt(model.acrDatabase.generatedAt || model.skillDatabase?.source?.generatedAt)
-	const supportedJobs = model.acrDatabase.jobs.filter(job => acrSupportStatus(job).key === 'supported').length
-	const waitingJobs = model.acrDatabase.jobs.filter(job => acrSupportStatus(job).key === 'waiting').length
-	const unsupportedJobs = model.acrDatabase.jobs.length - supportedJobs - waitingJobs
+	const allJobs = model.acrDatabase.jobs
+	const supportedJobs = allJobs.filter(job => acrSupportStatus(job).key === 'supported')
+	const waitingJobs = allJobs.filter(job => acrSupportStatus(job).key === 'waiting')
+	const unsupportedJobs = allJobs.filter(job => acrSupportStatus(job).key === 'unsupported')
+	const roleLabel = role => ({ tank: t('role.tank'), healer: t('role.healer'), dps: t('role.dps'), ranged: t('role.ranged'), caster: t('role.caster'), melee: t('role.melee') }[role] || role)
+	const renderJobGroup = (jobs, heading, count) => jobs.length ? `
+		<div class="acr-group" data-status="${heading}">
+			<div class="acr-group-head">
+				<strong>${heading}</strong>
+				<span class="acr-group-count">${count}</span>
+			</div>
+			<div class="acr-db-grid">
+				${jobs.map(job => {
+					const primaryAcr = job.acrs.find(acr => acr.enabled) ?? job.acrs[0]
+					return `
+					<article class="acr-job-card ${acrSupportStatus(job, primaryAcr).key}" data-role="${job.role}">
+						<div class="acr-card-head">
+							<strong>${job.name}</strong>
+							<span class="acr-role-badge">${roleLabel(job.role)}</span>
+						</div>
+						<small class="acr-card-id">${job.id}</small>
+						<div class="acr-card-fields">
+${renderAcrField(t('acr.field.status'), renderAcrStatusBadge(acrSupportStatus(job, primaryAcr)))}
+							${renderAcrField(t('acr.field.author'), primaryAcr?.author ?? primaryAcr?.name ?? t('status.unspecified'))}
+							${renderAcrField(t('acr.field.source'), publicAcrSourceLabel(primaryAcr?.source ?? model.skillDatabase?.source?.name))}
+							</div>
+						${job.acrs.length > 1 ? `
+						<div class="acr-chip-list">
+							${job.acrs.map(acr => `<span class="${acr.enabled ? 'active' : ''}" title="${publicAcrSourceLabel(acr.source)}">${acr.name}<small>${publicAcrSourceLabel(acr.source)}</small></span>`).join('')}
+						</div>` : ''}
+					</article>
+				`}).join('')}
+			</div>
+		</div>
+	` : ''
 	return `
 		<div class="modal-backdrop" role="dialog" aria-modal="true">
 			<section class="modal-panel acr-db-modal">
-				<div class="modal-header">
-					<div>
-						<p class="eyebrow">ACR 数据库</p>
-						<h3>职业 / 作者 / 生成时间</h3>
+				<div class="acr-modal-header">
+					<div class="acr-modal-title">
+<h3>${t('acr.title')}</h3>
+					<small>${generatedAt}</small>
+				</div>
+				<button class="mini-button" data-action="close-acr-database">${t('action.close')}</button>
+				</div>
+				<div class="acr-stats-bar">
+<div class="acr-stat"><strong>${allJobs.length}</strong><small>${t('acr.stat.jobs')}</small></div>
+				<div class="acr-stat"><strong>${model.acrDatabase.packages.length}</strong><small>${t('acr.stat.packages')}</small></div>
+				<div class="acr-stat supported"><strong>${supportedJobs.length}</strong><small>${t('acr.stat.supported')}</small></div>
+				<div class="acr-stat waiting"><strong>${waitingJobs.length}</strong><small>${t('acr.stat.waiting')}</small></div>
+				<div class="acr-stat unsupported"><strong>${unsupportedJobs.length}</strong><small>${t('acr.stat.unsupported')}</small></div>
+				</div>
+				<details class="acr-packages">
+					<summary>${t('acr.packages')} (${model.acrDatabase.packages.length})</summary>
+					<div class="package-line">${model.acrDatabase.packages.map(name => `<span>${name}</span>`).join('')}</div>
+				</details>
+${renderJobGroup(supportedJobs, t('acr.status.supported'), supportedJobs.length)}
+			${renderJobGroup(waitingJobs, t('acr.status.waiting'), waitingJobs.length)}
+			${renderJobGroup(unsupportedJobs, t('acr.status.unsupported'), unsupportedJobs.length)}
+			</section>
+		</div>
+	`
+}
+
+function renderAboutModal(model) {
+	if (!state.showAboutModal) {
+		return ''
+	}
+	const allJobs = model?.acrDatabase?.jobs ?? []
+	const supportedJobs = allJobs.filter(job => acrSupportStatus(job).key === 'supported')
+	const supportedJobsValue = t('about.supportedJobsValue')
+		.replace('{supported}', supportedJobs.length)
+		.replace('{total}', allJobs.length)
+	const rows = [
+		{label: t('about.projectName'), value: 'WebTimeline'},
+		{label: t('about.intro'), value: t('about.introValue')},
+		{label: t('about.author'), value: APP_AUTHOR},
+		{label: t('about.version'), value: APP_VERSION},
+		{label: t('about.updatedAt'), value: APP_UPDATED_AT},
+		{label: t('about.supportedJobs'), value: supportedJobsValue},
+		{label: t('about.acrSource'), value: t('about.acrSourceValue')},
+		{label: t('about.fflogs'), value: t('about.supported')},
+		{label: t('about.localImport'), value: t('about.supported')},
+		{label: t('about.port'), value: APP_PORT},
+	]
+	return `
+		<div class="modal-backdrop" data-backdrop-close="about" role="dialog" aria-modal="true" aria-label="${t('about.title')}">
+			<section class="modal-panel about-modal">
+				<div class="acr-modal-header">
+					<div class="acr-modal-title">
+						<h3>${t('about.title')}</h3>
+						<small>WebTimeline · ${APP_VERSION}</small>
 					</div>
-					<button class="mini-button" data-action="close-acr-database">关闭</button>
+					<button class="mini-button" data-action="close-about">${t('action.close')}</button>
 				</div>
-				<div class="acr-db-summary">
-					<span>数据库生成时间：${generatedAt}</span>
-					<span>ACR 包：${model.acrDatabase.packages.length}</span>
-					<span>职业：${model.acrDatabase.jobs.length}</span>
-					<span>已支持：${supportedJobs}</span>
-					<span>未支持：${unsupportedJobs}</span>
-					<span>等待接入：${waitingJobs}</span>
-				</div>
-				<div class="package-line">${model.acrDatabase.packages.map(name => `<span>${name}</span>`).join('')}</div>
-				<div class="acr-db-grid">
-					${model.acrDatabase.jobs.map(job => {
-						const primaryAcr = job.acrs.find(acr => acr.enabled) ?? job.acrs[0]
-						return `
-						<article class="acr-job-card ${job.enabled ? '' : 'disabled'}">
-							<div>
-								<strong>${job.name}</strong>
-								<small>${job.id} / ${job.role}</small>
-							</div>
-							${renderAcrField('支持状态：', renderAcrStatusBadge(acrSupportStatus(job, primaryAcr)))}
-							${renderAcrField('作者：', primaryAcr?.author ?? primaryAcr?.name ?? '未指定')}
-							${renderAcrField('数据来源：', publicAcrSourceLabel(primaryAcr?.source ?? model.skillDatabase?.source?.name))}
-							<div class="acr-chip-list">
-								${job.acrs.map(acr => `<span class="${acr.enabled ? '' : 'disabled'}" title="${publicAcrSourceLabel(acr.source)}">${acr.name}<small>${publicAcrSourceLabel(acr.source)}</small></span>`).join('')}
-							</div>
-						</article>
-					`}).join('')}
-				</div>
+				<dl class="about-list">
+					${rows.map(row => `<div class="about-row"><dt>${row.label}</dt><dd>${row.value}</dd></div>`).join('')}
+				</dl>
 			</section>
 		</div>
 	`
@@ -4312,42 +6125,42 @@ function renderAcrModal(model) {
 
 function acrSupportStatus(job, acr) {
 	if (!job) {
-		return {key: 'waiting', label: '等待接入'}
+		return {key: 'waiting', label: t('acr.status.waiting')}
 	}
 	if (!job.enabled) {
-		return {key: 'unsupported', label: '未支持'}
+		return {key: 'unsupported', label: t('acr.status.unsupported')}
 	}
 	if (acr && !acr.enabled) {
-		return {key: 'unsupported', label: '未支持'}
+		return {key: 'unsupported', label: t('acr.status.unsupported')}
 	}
 	if (!job.acrs?.length) {
-		return {key: 'waiting', label: '等待接入'}
+		return {key: 'waiting', label: t('acr.status.waiting')}
 	}
 	if (!acr && !job.acrs.some(item => item.enabled)) {
-		return {key: 'waiting', label: '等待接入'}
+		return {key: 'waiting', label: t('acr.status.waiting')}
 	}
-	return {key: 'supported', label: '已支持'}
+	return {key: 'supported', label: t('acr.status.supported')}
 }
 
 function renderAcrStatusBadge(status) {
-	const safeStatus = status ?? {key: 'waiting', label: '等待接入'}
+	const safeStatus = status ?? {key: 'waiting', label: t('acr.status.waiting')}
 	return `<span class="acr-status ${safeStatus.key}">${safeStatus.label}</span>`
 }
 
 function renderAcrField(label, value) {
-	const content = value == null || value === '' ? '未指定' : value
+	const content = value == null || value === '' ? t('status.unspecified') : value
 	return `<div class="acr-field"><span>${label}</span><strong>${content}</strong></div>`
 }
 
 function publicAcrSourceLabel(source = '') {
-	const value = String(source ?? '').trim()
-	if (!value) {
-		return '未指定'
-	}
-	if (/反编译|decompiled/i.test(value)) {
-		return 'ACR 数据'
-	}
-	return value
+const value = String(source ?? '').trim()
+if (!value) {
+return t('status.unspecified')
+}
+if (/反编译|decompiled/i.test(value)) {
+return t('acr.dataLabel')
+}
+return value
 }
 
 function renderIcon(name = '', explicitUrl = '') {
@@ -4363,6 +6176,75 @@ function renderIcon(name = '', explicitUrl = '') {
 
 function findActionByName(name = '') {
 	return state.model?.skillDatabase?.skills?.find(skill => name.includes(skill.name) || skill.name.includes(name))
+}
+
+function uniqueSkillLibraryItems(items = []) {
+	// Phase 1: dedupe by actionId, keeping the first (database-preferred) occurrence.
+	const byActionId = new Map()
+	for (const item of items) {
+		const aid = String(item.actionId ?? '')
+		if (!aid) {
+			continue
+		}
+		if (!byActionId.has(aid)) {
+			byActionId.set(aid, item)
+		}
+	}
+	const byActionList = [...byActionId.values()]
+	// Items without actionId — dedupe by name+category fallback.
+	const noActionItems = []
+	const seenFallback = new Set()
+	for (const item of items) {
+		if (String(item.actionId ?? '')) {
+			continue
+		}
+		const name = String(item.name ?? item.label ?? '')
+		const cat = String(item.category ?? item.type ?? item.sidebarType ?? '')
+		const fkey = `name:${name}|${cat}`
+		if (!name || seenFallback.has(fkey)) {
+			continue
+		}
+		seenFallback.add(fkey)
+		noActionItems.push(item)
+	}
+	// Phase 2: merge entries that share the same display name but have different actionIds.
+	// These are typically the same skill with variant IDs (e.g. PvE / PvP / effect variants).
+	const byName = new Map()
+	for (const item of [...byActionList, ...noActionItems]) {
+		const name = String(item.name ?? item.label ?? '').trim()
+		if (!name) {
+			continue
+		}
+		if (!byName.has(name)) {
+			byName.set(name, {
+				...item,
+				relatedActionIds: String(item.actionId ?? '') ? [String(item.actionId)] : [],
+				occurrenceCount: 1,
+				sources: new Set(item.source ? [item.source] : []),
+			})
+			continue
+		}
+		const existing = byName.get(name)
+		existing.occurrenceCount += 1
+		const aid = String(item.actionId ?? '')
+		if (aid && !existing.relatedActionIds.includes(aid)) {
+			existing.relatedActionIds.push(aid)
+		}
+		if (item.source) {
+			existing.sources.add(item.source)
+		}
+		// Prefer database entries for icon/category metadata.
+		if (!existing.iconUrl && item.iconUrl) {
+			existing.iconUrl = item.iconUrl
+		}
+		if (!existing.skillType && item.skillType) {
+			existing.skillType = item.skillType
+		}
+	}
+	return [...byName.values()].map(item => ({
+		...item,
+		sources: [...item.sources],
+	}))
 }
 
 function uniqueSkillEvents(events) {
@@ -4415,25 +6297,16 @@ function focusEventKey(event) {
 	].join('|')
 }
 
-function renderFocusAddRow() {
-	return `
-		<div class="focus-add-control">
-			<button data-action="open-focus-picker">+ 关注技能</button>
-			<span>${state.focusedSkills.length ? `已追踪 ${state.focusedSkills.length} 个技能` : '点击选择当前职业技能'}</span>
-		</div>
-	`
-}
-
 function renderFocusAddLabel() {
-	return `<button class="focus-label-button" data-action="open-focus-picker">+ 关注技能</button>`
+	return `<button class="focus-label-button" data-action="open-focus-picker">${t('action.addFocus')}</button>`
 }
 
 function renderFocusedSkillLabel(skill, actionId, count) {
 	return `
 		<span class="focus-label">
-			<span class="focus-label-name">${escapeHtml(skill?.name ?? `技能 ${actionId}`)}</span>
-			<small>${count} 次</small>
-			<button class="focus-label-remove" data-action="remove-focused-skill" data-focus-skill="${actionId}" title="取消关注">×</button>
+			<span class="focus-label-name">${escapeHtml(skill?.name ?? `${t('focus.skillId')} ${actionId}`)}</span>
+			<small>${count} ${t('focus.timesSuffix')}</small>
+			<button class="focus-label-remove" data-action="remove-focused-skill" data-focus-skill="${actionId}" title="${t('action.removeFocus')}">×</button>
 		</span>
 	`
 }
@@ -4551,6 +6424,28 @@ function actionById(actionId) {
 	return state.model.skillDatabase?.actionsById?.[String(actionId)] ?? null
 }
 
+function localizedActionName(actionId, fallback = '') {
+	const id = Number(actionId)
+	if (!Number.isFinite(id)) {
+		return ACTION_LABELS.get(String(actionId)) ?? fallback
+	}
+	return ACTION_LABELS.get(id)
+		?? actionById(id)?.name
+		?? ACTION_LABELS.get(String(actionId))
+		?? fallback
+}
+
+function bossActionDisplayName(event = {}) {
+	const rawName = String(event.name ?? event.label ?? '').trim()
+	if (!rawName) {
+		return ''
+	}
+	// Strip axis-annotation prefixes like "P1死刑 ", "半场刀 ", "死刑 ", "关爆发 " etc.
+	const annotationPattern = /^(?:P\d+[\s\u3000]*)?(?:死刑|半场刀|半场|开启|关闭|关爆发|关爆)[\s\u3000]*/
+	const cleaned = rawName.replace(annotationPattern, '').trim()
+	return cleaned || rawName
+}
+
 function actionByName(name = '') {
 	const normalizedName = String(name ?? '').trim()
 	if (!normalizedName) {
@@ -4582,15 +6477,16 @@ function displayNameForAction(event = {}) {
 	if (event.kind === 'qt-control' || event.type === 'qt') {
 		return event.name ?? event.label ?? 'QT 控制'
 	}
-	const actionId = Number(event.actionId)
-	if (!Number.isFinite(actionId)) {
-		return event.name ?? event.label ?? '技能'
+	if (event.kind === 'boss-cast' || event.type === 'cast') {
+		const bossName = bossActionDisplayName(event)
+		return bossName || (event.name ?? event.label ?? '技能')
 	}
-	return ACTION_LABELS.get(actionId)
-		?? actionById(actionId)?.name
-		?? event.name
-		?? event.label
-		?? `技能 ${actionId}`
+	const actionId = event.actionId ?? event.id
+	const localized = localizedActionName(actionId, '')
+	if (localized) {
+		return localized
+	}
+	return event.name ?? event.label ?? '技能'
 }
 
 function renderBossAvatar(name, index = 0) {
@@ -4658,7 +6554,8 @@ function insertManualSkill() {
 	const id = document.querySelector('[data-field="skill-id"]')?.value.trim()
 	const action = state.model.skillDatabase?.actionsById?.[id]
 	const name = action?.name ?? `技能 ${id}`
-	const output = Boolean(action?.output)
+	const classification = classifyImportedAction(id, name, 'player-action')
+	const output = Boolean(classification.output)
 	if (!id) return
 	state.insertSkillId = id
 	const timeMs = 90000 + state.inserted.length * 8000
@@ -4671,9 +6568,13 @@ function insertManualSkill() {
 		requestedTimeMs: timeMs,
 		kind: 'player-action',
 		source: 'manual',
-		classification: action?.type ?? 'unknown',
+		target: defaultManualTargetForAction(action, classification.type),
+		targetRequired: requiresManualTargetChoice(action, classification.type),
+		targetMode: null,
+		targetDataId: null,
+		classification: classification.type,
 		output,
-		potency: output ? Number(action?.potency ?? 0) : 0,
+		potency: output ? Number(classification.potency ?? 0) : 0,
 		recastMs: Number(action?.recastMs ?? 0),
 		iconUrl: action?.iconUrl ?? '',
 		count: 1,
@@ -4686,7 +6587,7 @@ function insertManualSkill() {
 }
 
 function insertSkillAtTimeline(actionId, event, timeline) {
-	const dropLane = timelineDropLaneForTarget(event.target)
+	const dropLane = timelineDropLaneAtClientPoint(event.clientX, event.clientY) || timelineDropLaneForTarget(event.target)
 	if (!canDropActionOnTimelineLane(actionId, dropLane)) {
 		setImportError('这个技能不能放到当前功能行')
 		return
@@ -4761,6 +6662,11 @@ function insertQtAtTimeline(qtIndex, event, timeline) {
 	if (!canEditTimeline()) {
 		return
 	}
+	const dropLane = timelineDropLaneAtClientPoint(event.clientX, event.clientY) || timelineDropLaneForTarget(event.target)
+	if (!canDropQtOnTimelineLane(dropLane)) {
+		setImportError('QT 只能放到 QT 控制行')
+		return
+	}
 	const dropInfo = timelineDropInfoForClientX(event.clientX, timeline)
 	insertQtAtMs(qtIndex, dropInfo.absoluteTimeMs, {phaseInfo: dropInfo})
 }
@@ -4775,6 +6681,11 @@ function insertQtAtClientPoint(qtIndex, clientX, clientY) {
 		render()
 		return false
 	}
+	const dropLane = timelineDropLaneAtClientPoint(clientX, clientY)
+	if (!canDropQtOnTimelineLane(dropLane)) {
+		setImportError('QT 只能放到 QT 控制行')
+		return false
+	}
 	const dropInfo = timelineDropInfoForClientX(clientX, timeline)
 	insertQtAtMs(qtIndex, dropInfo.absoluteTimeMs, {phaseInfo: dropInfo})
 	return true
@@ -4784,7 +6695,7 @@ function insertPotionAtTimeline(potionId, event, timeline) {
 	if (!canEditTimeline()) {
 		return
 	}
-	const dropLane = timelineDropLaneForTarget(event.target)
+	const dropLane = timelineDropLaneAtClientPoint(event.clientX, event.clientY) || timelineDropLaneForTarget(event.target)
 	if (!canDropPotionOnTimelineLane(dropLane)) {
 		setImportError('爆发药只能放到爆发行')
 		return
@@ -4820,6 +6731,8 @@ function insertQtAtMs(qtIndex, timeMs, options = {}) {
 		render()
 		return
 	}
+	const window = burstWindowForTime(burst, Number(burst.timeMs ?? burst.startMs ?? timeMs), 0)
+	const label = burstLabelForWindow(window)
 	const phaseInfo = options.phaseInfo ?? phaseLabelForTime(state.model.bossTimeline?.source, 'all', timeMs)
 	insertManualQtControl(qt.name, timeMs, {
 		phaseInfo,
@@ -4932,9 +6845,9 @@ function insertBurstPackageAtTimeline(burstIndex, event, timeline) {
 	if (!canEditTimeline()) {
 		return
 	}
-	const dropLane = timelineDropLaneForTarget(event.target)
+	const dropLane = timelineDropLaneAtClientPoint(event.clientX, event.clientY) || timelineDropLaneForTarget(event.target)
 	if (!canDropBurstPackageOnTimelineLane(dropLane)) {
-		setImportError('爆发包只能放到爆发行')
+		setImportError('爆发只能放到爆发行')
 		return
 	}
 	const dropInfo = timelineDropInfoForClientX(event.clientX, timeline)
@@ -4952,7 +6865,7 @@ function insertBurstPackageAtClientPoint(burstIndex, clientX, clientY) {
 	}
 	const dropLane = timelineDropLaneAtClientPoint(clientX, clientY)
 	if (!canDropBurstPackageOnTimelineLane(dropLane)) {
-		setImportError('爆发包只能放到爆发行')
+		setImportError('爆发只能放到爆发行')
 		return
 	}
 	const dropInfo = dropTimeInfoForClientPoint(clientX, clientY, timelineDragGuideContext(timeline))
@@ -4965,7 +6878,7 @@ function insertBurstPackageAtMs(burstIndex, timeMs, options = {}) {
 	}
 	const burst = burstInsertByIndex(burstIndex)
 	if (!burst) {
-		setImportError('没有找到这个爆发包')
+		setImportError('没有找到这个爆发')
 		render()
 		return
 	}
@@ -4973,11 +6886,11 @@ function insertBurstPackageAtMs(burstIndex, timeMs, options = {}) {
 	const manualId = `manual-burst-${Date.now()}-${state.inserted.length}`
 	state.inserted.push({
 		id: manualId,
-		name: burst.window === '120s' ? '120 爆发包' : '60 爆发包',
-		label: burst.window === '120s' ? '120 爆发包' : '60 爆发包',
+		name: label,
+		label,
 		type: 'burst-package',
 		kind: 'burst-package',
-		window: burst.window,
+		window,
 		timeMs,
 		requestedTimeMs: timeMs,
 		phase: phaseInfo.phaseId === 'all' ? 'global' : phaseInfo.phaseId.toUpperCase(),
@@ -4996,7 +6909,7 @@ function insertBurstPackageAtMs(burstIndex, timeMs, options = {}) {
 	const inserted = state.inserted.find(item => item.id === manualId)
 	const adjusted = Number(inserted?.cdAdjustedMs ?? 0)
 	const timeLabel = manualInsertStatusTime(inserted ?? {timeMs, ...phaseInfo})
-	setImportStatus(adjusted > 0 ? `已插入 ${burst.window === '120s' ? '120' : '60'} 爆发包，爆发窗口已顺延到 ${timeLabel}` : `已插入 ${burst.window === '120s' ? '120' : '60'} 爆发包 到 ${timeLabel}`)
+	setImportStatus(adjusted > 0 ? `已插入 ${window === '120s' ? '120' : '60'} 爆发，爆发窗口已顺延到 ${timeLabel}` : `已插入 ${window === '120s' ? '120' : '60'} 爆发 到 ${timeLabel}`)
 	render()
 }
 
@@ -5052,6 +6965,11 @@ function insertSkillAtMs(actionId, timeMs, options = {}) {
 	}
 	const action = actionById(actionId)
 	const name = action?.name ?? `技能 ${actionId}`
+	const conflict = checkCooldownConflict(actionId, timeMs)
+	if (conflict?.conflict) {
+		setImportError(conflict.message)
+		return
+	}
 	const classification = classifyImportedAction(actionId, name, 'player-action')
 	const manualId = `manual-${Date.now()}`
 	const phaseInfo = options.phaseInfo ?? phaseLabelForTime(state.model.bossTimeline?.source, 'all', timeMs)
@@ -5079,6 +6997,11 @@ function insertSkillAtMs(actionId, timeMs, options = {}) {
 	})
 	normalizeManualStateQueue()
 	const inserted = state.inserted.find(item => item.id === manualId)
+	if (inserted?.targetRequired && !inserted.target) {
+		state.pendingTargetPicker = inserted.id
+	} else if (state.pendingTargetPicker === manualId) {
+		state.pendingTargetPicker = null
+	}
 	const adjusted = Number(inserted?.cdAdjustedMs ?? 0)
 	const timeLabel = manualInsertStatusTime(inserted ?? {timeMs, ...phaseInfo})
 	setImportStatus(adjusted > 0 ? `已插入 ${name}，队列已顺延到 ${timeLabel}` : `已插入 ${name} 到 ${timeLabel}`)
@@ -5110,6 +7033,11 @@ function moveManualSkillAtTimeline(manualId, event, timeline) {
 	}
 	const dropInfo = timelineDropInfoForClientX(event.clientX, timeline)
 	const timeMs = dropInfo.absoluteTimeMs
+	const conflict = checkCooldownConflict(item.actionId, timeMs, {excludeId: manualId})
+	if (conflict?.conflict) {
+		setImportError(conflict.message)
+		return
+	}
 	item.requestedTimeMs = timeMs
 	item.timeMs = timeMs
 	item.phase = dropInfo.phaseId === 'all' ? 'global' : dropInfo.phaseId.toUpperCase()
@@ -5129,13 +7057,20 @@ function moveExistingTimelineEventAtTimeline(eventKey, event, timeline) {
 		return
 	}
 	const dropInfo = timelineDropInfoForClientX(event.clientX, timeline)
+	const target = targets[0]
+	if (target?.event?.actionId) {
+		const conflict = checkCooldownConflict(target.event.actionId, dropInfo.absoluteTimeMs, {excludeId: target.event.id})
+		if (conflict?.conflict) {
+			setImportError(conflict.message)
+			return
+		}
+	}
 	for (const target of targets) {
 		updateTimelineEventPosition(target.event, dropInfo)
 	}
 	if (targets.some(target => target.event.actionId)) {
 		normalizeManualStateQueue()
 	}
-	const target = targets[0]
 	setImportStatus(`已调整 ${displayNameForAction(target.event)} 到 ${timelineEventStatusTime(target.event)}`)
 	render()
 }
@@ -5201,6 +7136,11 @@ function updateManualSkillTime(manualId, secondsValue) {
 		return
 	}
 	const clamped = clampMsToCurrentPhase(seconds * 1000)
+	const conflict = checkCooldownConflict(item.actionId, clamped.absoluteTimeMs, {excludeId: manualId})
+	if (conflict?.conflict) {
+		setImportError(conflict.message)
+		return
+	}
 	item.requestedTimeMs = clamped.absoluteTimeMs
 	item.timeMs = clamped.absoluteTimeMs
 	item.phase = clamped.phaseId === 'all' ? 'global' : clamped.phaseId.toUpperCase()
@@ -5219,6 +7159,9 @@ function updateManualSkillTarget(manualId, value) {
 		return
 	}
 	item.target = String(value ?? '')
+	if (state.pendingTargetPicker === manualId && item.target) {
+		state.pendingTargetPicker = null
+	}
 	if (item.target) {
 		setImportStatus(`已设置 ${item.name} 目标为 ${item.target}`)
 	} else if (item.targetRequired) {
@@ -5420,7 +7363,7 @@ async function importDefaultTimeline(sourceId) {
 	}
 	setImportStatus(`正在导入 ${source.label}...`)
 	try {
-		const response = await fetch(encodeURI(source.url))
+		const response = await fetch(source.url)
 		if (!response.ok) {
 			throw new Error(`导入失败：HTTP ${response.status}`)
 		}
@@ -5576,7 +7519,13 @@ function buildImportedTimelineModel(timelineJson, sourceLabel) {
 	const tracks = buildImportedModeTracks(events)
 	const timelineRows = buildImportedTimelineRows(events)
 	const damageEvents = events.filter(event => event.output)
-	const openerEvents = events.filter(event => event.kind === 'player-action' && event.timeMs <= 24000)
+	const openerEvents = events
+		.filter(event => event.kind === 'player-action' && event.timeMs <= 24000)
+		.map(event => ({
+			...event,
+			classification: event.classification ?? 'opener',
+			opener: true,
+		}))
 	return {
 		name: meta.Name ?? sourceLabel,
 		territoryId: meta.TerritoryId ?? state.model.encounter.territoryId,
@@ -5872,13 +7821,14 @@ function importedEventDurationMs(event = {}, action = null, fallbackKind = 'play
 
 function buildBurstGroupsFromExport(burstPackages, playerEvents) {
 	if (Array.isArray(burstPackages) && burstPackages.length) {
-		return burstPackages.map(packageItem => {
+		return burstPackages.map((packageItem, index) => {
 			const startMs = Number(packageItem.startMs ?? 0)
 			const inferredDurationMs = Math.max(0, Number(packageItem.endMs ?? 0) - startMs)
 			const durationMs = Number(packageItem.durationMs ?? inferredDurationMs) || 12000
+			const window = burstWindowForTime(packageItem, startMs, index)
 			return {
-				window: packageItem.window ?? (String(packageItem.label ?? '').includes('120') ? '120s' : '60s'),
-				name: packageItem.label ?? (packageItem.window === '120s' ? '120 爆发' : '60 爆发'),
+				window,
+				name: burstLabelForWindow(window),
 				timeMs: startMs,
 				durationMs,
 				source: 'import',
@@ -5896,6 +7846,7 @@ function flattenImportedTimeline(timelineJson) {
 	const {events} = flattenPrTimeline(timelineJson, {
 		resolveConditionTimeMs: (condition, cursorMs) => resolveBossCastConditionTimeMs(condition, cursorMs, bossCasts),
 		shouldBlockOnUnresolvedCondition: ({conditions}) => conditions.some(isBlockingImportedCondition),
+		actionRecastMs: ({action}) => Number(actionById(action?.ActionId)?.recastMs ?? 0),
 		delayEvent: ({node, durationMs}) => ({
 			kind: 'delay',
 			name: node.Name ?? '延迟',
@@ -5941,6 +7892,7 @@ function flattenImportedTimeline(timelineJson) {
 				output: classification.output,
 				potency: classification.potency,
 				durationMs: classification.effectDurationMs ?? 0,
+				recastMs: Number(actionRecord?.recastMs ?? 0),
 				iconUrl: actionRecord?.iconUrl ?? '',
 				count: 1,
 			}]
@@ -5956,7 +7908,7 @@ function isBlockingImportedCondition(condition = {}) {
 function buildImportedModeTracks(events) {
 	const boss = events.filter(event => event.kind === 'boss-cast')
 	const player = events.filter(event => ['player-action', 'potion', 'qt-control'].includes(event.kind))
-	const mitigation = player.filter(event => event.classification === 'mitigation' || event.classification === 'healing')
+	const mitigation = filterCooldownConflictingTimelineItems(player.filter(event => event.classification === 'mitigation' || event.classification === 'healing'))
 	const burst = buildImportedBurstGroups(player)
 	return {
 		beginner: {
@@ -5980,9 +7932,9 @@ function buildImportedTimelineRows(events) {
 		.filter(event => event.kind === 'player-action')
 		.filter(event => !isCoverageTimelineEvent(event))
 		.map(event => importedActionItem(event, 'action'))
-	const mitigationActions = events
+	const mitigationActions = filterCooldownConflictingTimelineItems(events
 		.filter(event => event.kind === 'player-action')
-		.filter(isCoverageTimelineEvent)
+		.filter(isCoverageTimelineEvent))
 		.map(event => importedActionItem(event, 'action'))
 	const qtPotion = events
 		.filter(event => event.kind === 'qt-control' || event.kind === 'potion')
@@ -5998,7 +7950,7 @@ function buildImportedTimelineRows(events) {
 function mergeImportedRowsWithBossTimeline(importedRows) {
 	const bossRows = (state.model.timelineRows ?? []).filter(row => {
 		const id = row.groupId ?? row.id
-		return id === 'boss-casts' || id === 'boss-damage'
+		return id === 'boss' || id === 'boss-casts' || id === 'boss-damage'
 	})
 	return [...bossRows, ...importedRows]
 }
@@ -6052,6 +8004,7 @@ function importedActionItem(event, fallbackType) {
 		potency: event.potency ?? 0,
 		target: event.target,
 		durationMs,
+		recastMs: event.recastMs ?? actionById(event.actionId)?.recastMs ?? 0,
 		classification: event.classification,
 		iconUrl: event.iconUrl ?? '',
 		phase: event.phase,
@@ -6060,7 +8013,7 @@ function importedActionItem(event, fallbackType) {
 }
 
 function exportTimeline() {
-	const payload = buildExportTimelineFromState()
+	const payload = buildNativePrExportFromState()
 	const fileName = `${state.model.encounter.name ?? 'webtimeline'}-${state.job}.json`
 	const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'})
 	const url = URL.createObjectURL(blob)
@@ -6073,8 +8026,13 @@ function exportTimeline() {
 	URL.revokeObjectURL(url)
 }
 
-function buildExportTimelineFromState() {
+function buildNativePrExportFromState() {
+	return exportNativePrTimeline()
+}
+
+function buildWebTimelineExportFromState() {
 	const track = state.model.tracks.expert
+	const nativeTimeline = exportNativePrTimeline()
 	const meta = {
 		name: state.model.encounter.name,
 		territoryId: state.model.encounter.territoryId,
@@ -6100,15 +8058,23 @@ function buildExportTimelineFromState() {
 		focusedSkills: [...state.focusedSkills],
 		manual: state.inserted.map(exportTimelineEvent),
 		categories: exportTimelineCategories(track),
-		Meta: {
-			Name: state.model.encounter.name,
-			TerritoryId: state.model.encounter.territoryId,
-			Job: String(state.model.encounter.jobId ?? ''),
-			JobId: state.model.encounter.jobId,
-			Author: state.acr,
-			AcrAuthor: state.acr,
-			Opener: state.model.encounter.opener,
-		},
+		Meta: nativeTimeline.Meta,
+		Root: nativeTimeline.Root,
+	}
+}
+
+function exportNativePrTimeline() {
+	if (state.currentTimelineJson?.Root) {
+		const nativeMeta = state.currentTimelineJson.Meta
+			? jsonClone(state.currentTimelineJson.Meta)
+			: defaultNativeTimelineMeta()
+		return {
+			Meta: nativeMeta,
+			Root: jsonClone(state.currentTimelineJson.Root),
+		}
+	}
+	return {
+		Meta: defaultNativeTimelineMeta(),
 		Root: {
 			Name: 'WebTimeline 导出',
 			Type: 'folder',
@@ -6121,6 +8087,22 @@ function buildExportTimelineFromState() {
 	}
 }
 
+function defaultNativeTimelineMeta() {
+	return {
+		Name: state.model.encounter.name,
+		TerritoryId: state.model.encounter.territoryId,
+		Job: String(state.model.encounter.jobId ?? ''),
+		JobId: state.model.encounter.jobId,
+		Author: state.acr,
+		AcrAuthor: state.acr,
+		Opener: state.model.encounter.opener,
+	}
+}
+
+function jsonClone(value) {
+	return JSON.parse(JSON.stringify(value))
+}
+
 function exportTimelineActionNode(item = {}) {
 	if (item.kind === 'qt-control') {
 		return {
@@ -6131,7 +8113,7 @@ function exportTimelineActionNode(item = {}) {
 	if (item.type === 'burst-package' || item.kind === 'burst-package') {
 		return {
 			Type: 'Group',
-			Name: item.name ?? item.label ?? '爆发包',
+			Name: item.name ?? item.label ?? '爆发',
 		}
 	}
 	return {
@@ -6440,3 +8422,119 @@ function clampPercent(value, min = 50, max = 100) {
 	}
 	return Math.min(max, Math.max(min, Math.round(number * 10) / 10))
 }
+
+/* ── Mini timeline navigator: sync + drag ── */
+let timelineNavDrag = null
+
+function updateTimelineNav() {
+	const timeline = document.querySelector('.xiva-timeline')
+	const track = document.querySelector('[data-timeline-nav-track]')
+	const thumb = document.querySelector('[data-timeline-nav-thumb]')
+	if (!timeline || !track || !thumb) {
+		return
+	}
+	const maxScroll = timeline.scrollWidth - timeline.clientWidth
+	if (maxScroll <= 0) {
+		thumb.style.width = '100%'
+		thumb.style.transform = 'translateX(0)'
+		return
+	}
+	const trackWidth = track.clientWidth
+	const thumbWidth = Math.max(42, thumb.offsetWidth || 42)
+	const thumbLeft = maxScroll > 0
+		? Math.round((trackWidth - thumbWidth) * (timeline.scrollLeft / maxScroll))
+		: 0
+	thumb.style.width = `${thumbWidth}px`
+	thumb.style.transform = `translateX(${thumbLeft}px)`
+}
+
+function setTimelineScrollFromNav(clientX) {
+	const timeline = document.querySelector('.xiva-timeline')
+	const track = document.querySelector('[data-timeline-nav-track]')
+	if (!timeline || !track) {
+		return
+	}
+	const maxScroll = timeline.scrollWidth - timeline.clientWidth
+	if (maxScroll <= 0) {
+		return
+	}
+	const rect = track.getBoundingClientRect()
+	const thumb = track.querySelector('[data-timeline-nav-thumb]')
+	const thumbWidth = thumb ? thumb.offsetWidth : 42
+	const usableRange = Math.max(1, rect.width - thumbWidth)
+	const ratio = Math.min(1, Math.max(0, (clientX - rect.left - thumbWidth / 2) / usableRange))
+	timeline.scrollLeft = ratio * maxScroll
+}
+
+document.addEventListener('pointerdown', event => {
+	const thumbTarget = event.target instanceof Element ? event.target.closest('[data-timeline-nav-thumb]') : null
+	const track = thumbTarget
+		? thumbTarget.closest('[data-timeline-nav-track]')
+		: event.target instanceof Element ? event.target.closest('[data-timeline-nav-track]') : null
+	if (!track) {
+		return
+	}
+	const thumb = track.querySelector('[data-timeline-nav-thumb]')
+	const thumbRect = thumb?.getBoundingClientRect()
+	const isOnThumb = Boolean(thumbTarget) || Boolean(thumbRect && event.clientX >= thumbRect.left && event.clientX <= thumbRect.right)
+	// Click on track (not thumb) jumps to that position
+	if (!isOnThumb) {
+		setTimelineScrollFromNav(event.clientX)
+	}
+	timelineNavDrag = {
+		pointerId: event.pointerId,
+		startClientX: event.clientX,
+		startScrollLeft: document.querySelector('.xiva-timeline')?.scrollLeft ?? 0,
+	}
+	track.setPointerCapture?.(event.pointerId)
+	event.preventDefault()
+})
+
+document.addEventListener('pointermove', event => {
+	if (!timelineNavDrag || timelineNavDrag.pointerId !== event.pointerId) {
+		return
+	}
+	const timeline = document.querySelector('.xiva-timeline')
+	if (!timeline) {
+		return
+	}
+	const maxScroll = timeline.scrollWidth - timeline.clientWidth
+	if (maxScroll <= 0) {
+		return
+	}
+	const track = document.querySelector('[data-timeline-nav-track]')
+	if (!track) {
+		return
+	}
+	const trackRect = track.getBoundingClientRect()
+	const thumb = track.querySelector('[data-timeline-nav-thumb]')
+	const thumbWidth = thumb ? thumb.offsetWidth : 42
+	const usableRange = trackRect.width - thumbWidth
+	const deltaPx = event.clientX - timelineNavDrag.startClientX
+	const deltaRatio = usableRange > 0 ? deltaPx / usableRange : 0
+	timeline.scrollLeft = timelineNavDrag.startScrollLeft + deltaRatio * maxScroll
+	updateTimelineNav()
+}, {passive: true})
+
+document.addEventListener('pointerup', event => {
+	if (timelineNavDrag && timelineNavDrag.pointerId === event.pointerId) {
+		timelineNavDrag = null
+	}
+})
+
+document.addEventListener('pointercancel', event => {
+	if (timelineNavDrag && timelineNavDrag.pointerId === event.pointerId) {
+		timelineNavDrag = null
+	}
+})
+
+// Sync navigator thumb when timeline scrolls
+document.addEventListener('scroll', event => {
+	if (!(event.target instanceof Element)) {
+		return
+	}
+	if (!event.target.classList?.contains('xiva-timeline')) {
+		return
+	}
+	requestAnimationFrame(updateTimelineNav)
+}, {passive: true, capture: true})

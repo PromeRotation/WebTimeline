@@ -144,6 +144,38 @@ test('converts selected phase-relative drop time into absolute fight time', () =
 	})
 })
 
+test('does not stack multiple items at the phase end boundary', () => {
+	const source = {
+		lastSecond: 1200,
+		phases: [
+			{id: 1, startSecond: 0},
+			{id: 2, startSecond: 200},
+			{id: 3, startSecond: 400},
+			{id: 4, startSecond: 700},
+			{id: 5, startSecond: 900},
+		],
+	}
+	const phaseDurationMs = 1200000 - 900000 // 300000
+	const rows = [
+		{
+			id: 'output-actions',
+			keepWhenEmpty: true,
+			items: [
+				{label: 'skill A', phase: 'P5', phaseStartMs: 437900, startMs: 800000, endMs: 801600},
+				{label: 'skill B', phase: 'P5', phaseStartMs: 437900, startMs: 810000, endMs: 811600},
+				{label: 'skill C', phase: 'P5', phaseStartMs: 437900, startMs: 820000, endMs: 821600},
+				{label: 'skill D', phase: 'P5', phaseStartMs: 437900, startMs: 480000, endMs: 481600},
+			],
+		},
+	]
+
+	const rebased = timelineView.timelineRowsForPhase(rows, source, 'p5')
+
+	assert.equal(rebased[0].items.length, 1)
+	assert.equal(rebased[0].items[0].label, 'skill D')
+	assert.ok(rebased[0].items[0].startMs < phaseDurationMs)
+})
+
 test('filters boss rows to the selected phase and hides absent bosses', () => {
 	const source = {
 		lastSecond: 300,
@@ -296,4 +328,59 @@ test('merges boss cast and damage rows with damage shown on cast items', () => {
 	assert.equal(statue.items[0].type, 'damage')
 	assert.equal(statue.items[0].label, 'Ray')
 	assert.equal(statue.items[0].damage, 9000)
+})
+
+test('filters out point-type skills whose rebased start time exceeds the phase duration', () => {
+	const source = {
+		lastSecond: 1200,
+		phases: [
+			{id: 1, startSecond: 0},
+			{id: 2, startSecond: 200},
+			{id: 3, startSecond: 400},
+			{id: 4, startSecond: 700},
+			{id: 5, startSecond: 900},
+		],
+	}
+	const rows = [
+		{
+			id: 'mitigation-actions',
+			keepWhenEmpty: true,
+			items: [
+				{label: 'P5 late skill', phase: 'P5', phaseStartMs: 437900, startMs: 800000, endMs: 801600},
+			],
+		},
+	]
+
+	const rebased = timelineView.timelineRowsForPhase(rows, source, 'p5')
+
+	assert.deepEqual(rebased[0].items, [], 'items beyond phase end should be filtered out, not clamped')
+})
+
+test('truncates bar items that cross the phase end boundary but keeps their start position', () => {
+	const source = {
+		lastSecond: 1200,
+		phases: [
+			{id: 1, startSecond: 0},
+			{id: 2, startSecond: 200},
+			{id: 3, startSecond: 400},
+			{id: 4, startSecond: 700},
+			{id: 5, startSecond: 900},
+		],
+	}
+	const phaseDurationMs = 1200000 - 900000 // 300000
+	const rows = [
+		{
+			id: 'boss-casts-chaos',
+			groupId: 'boss-casts',
+			items: [
+				{label: 'P5 end cast', startMs: 1180000, endMs: 1205000},
+			],
+		},
+	]
+
+	const rebased = timelineView.timelineRowsForPhase(rows, source, 'p5')
+	const item = rebased[0].items[0]
+
+	assert.equal(item.startMs, 280000)
+	assert.equal(item.endMs, phaseDurationMs)
 })

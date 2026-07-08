@@ -3,6 +3,8 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 	let sequence = 0
 	let currentPhase = 'P1'
 	let currentPhaseStartMs = 0
+	const actionReadyAtMs = new Map()
+	const runtimeOptions = {...options, actionCooldownReadyMs}
 
 	function pushEvent(timeMs, event) {
 		if (!event) {
@@ -37,7 +39,7 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 		}
 
 		if (type === 'condition') {
-			const {timeMs, resolved} = resolveConditionNodeTimeMs(node, cursorMs, options)
+			const {timeMs, resolved} = resolveConditionNodeTimeMs(node, cursorMs, runtimeOptions)
 			const conditions = nodeConditions(node)
 			if (!resolved.length && conditionMode(node) === 'wait' && conditions.length && shouldBlockOnUnresolvedCondition(node, conditions, options)) {
 				return walkResult(cursorMs, true)
@@ -49,7 +51,7 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 		}
 
 		if (type === 'branch') {
-			const activeIndex = resolveBranchActiveIndex(node, cursorMs, options)
+			const activeIndex = resolveBranchActiveIndex(node, cursorMs, runtimeOptions)
 			const child = (node.Children ?? [])[activeIndex]
 			return child ? walk(child, cursorMs) : walkResult(cursorMs)
 		}
@@ -60,6 +62,7 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 				for (const event of actionEvents) {
 					pushEvent(cursorMs, event)
 				}
+				recordActionCooldown(action, cursorMs)
 			}
 		}
 
@@ -86,6 +89,33 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 
 	const result = walk(timelineJson.Root, 0)
 	return {events, endMs: result.timeMs}
+
+	function recordActionCooldown(action, timeMs) {
+		const actionId = Number(action?.ActionId)
+		if (!Number.isFinite(actionId)) {
+			return
+		}
+		const recastMs = Number(options.actionRecastMs?.({action, timeMs}) ?? 0)
+		if (recastMs <= 0) {
+			return
+		}
+		actionReadyAtMs.set(actionId, Math.max(Number(actionReadyAtMs.get(actionId) ?? 0), Number(timeMs ?? 0) + recastMs))
+	}
+
+	function actionCooldownReadyMs(condition, cursorMs) {
+		if (conditionType(condition) !== 'skillcooldown') {
+			return null
+		}
+		if (!isCooldownReadyWait(condition)) {
+			return null
+		}
+		const actionId = Number(condition.ActionId ?? condition.Regex)
+		if (!Number.isFinite(actionId)) {
+			return null
+		}
+		const readyMs = Number(actionReadyAtMs.get(actionId) ?? cursorMs)
+		return Math.max(Number(cursorMs ?? 0), readyMs)
+	}
 }
 
 export function collectBossCastItems(timelineRows = []) {
@@ -140,6 +170,11 @@ function resolveConditionNodeTimeMs(node, cursorMs, options = {}) {
 }
 
 function resolvedConditionTimeMs(condition, cursorMs, options = {}, node = null) {
+	const cooldownMs = options.actionCooldownReadyMs?.(condition, cursorMs)
+	if (cooldownMs != null) {
+		const value = Number(cooldownMs)
+		return Number.isFinite(value) ? value : null
+	}
 	const resolvedMs = options.resolveConditionTimeMs?.(condition, cursorMs, node)
 	if (resolvedMs == null) {
 		return null
@@ -185,6 +220,12 @@ function conditionActionIds(condition = {}) {
 
 function conditionMode(node = {}) {
 	return String(node.Mode ?? 'wait').toLowerCase()
+}
+
+function isCooldownReadyWait(condition = {}) {
+	const mode = String(condition.Mode ?? '<=').trim()
+	const value = Number(condition.Value ?? 0)
+	return (mode === '<=' || mode === '<') && value <= 0
 }
 
 function walkResult(timeMs, blocked = false) {

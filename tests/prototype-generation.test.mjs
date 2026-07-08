@@ -7,19 +7,27 @@ import {
 	loadPrototypeInputs,
 } from '../src/prototype-generation.mjs'
 
-test('prototype generation merges decompiled ACRs with the KANO source ACR', async () => {
+test('prototype generation merges decompiled ACRs with source ACRs and PR runtime source', async () => {
 	const inputs = await loadPrototypeInputs({
 		timelinePath: '../资源/timelines/时间轴参考/KANO_DRK_妖星乱舞绝境战_MT减伤轴.json',
 		acrPackageRoot: '../资源/acr-packages/现在所有acr数据/ACR',
 		decompiledRoot: '../资源/data/decompiled',
 		sourceAcrPaths: ['F:/acr开发/KanoACR/Kano'],
+		promeRotationSourcePath: '../资源/source/PromeRotation-1.0',
 		loadBossTimeline: false,
 	})
 	const darkKnight = inputs.acrSources.find(source => source.package === 'KANO')
+	const xszyys = inputs.acrSources.find(source => source.package === 'XSZYYS')
+	const promeRotation = inputs.runtimeSources.find(source => source.package === 'PromeRotation')
 
 	assert.ok(inputs.packages.includes('KANO'))
+	assert.ok(inputs.packages.includes('XSZYYS'))
 	assert.equal(darkKnight.source, '源码 ACR')
 	assert.deepEqual(darkKnight.jobs, ['DRK'])
+	assert.deepEqual(xszyys.jobs, ['PLD', 'WAR', 'DRK'])
+	assert.equal(xszyys.source, '反编译 ACR')
+	assert.equal(promeRotation.source, 'PR 本体源码')
+	assert.ok(promeRotation.jobs.includes('WHM'))
 })
 
 test('prototype generation includes simulated ACR action IDs in Garland detail fetch set', async () => {

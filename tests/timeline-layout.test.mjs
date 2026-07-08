@@ -28,6 +28,18 @@ test('uses visual width when assigning lanes for boss cast bubbles', () => {
 	assert.equal(timelineLaneCount(laidOut), 2)
 })
 
+test('boss cast lane spacing can follow real cast duration without card-sized padding', () => {
+	const items = [
+		{id: 'a', type: 'cast', startMs: 1000, endMs: 1800},
+		{id: 'b', type: 'cast', startMs: 2200, endMs: 3000},
+	]
+
+	const laidOut = assignTimelineLanes(items, {durationMs: 120000, minVisualWidthPx: 0, trackWidthPx: 1200, laneGapMs: 0})
+
+	assert.deepEqual(laidOut.map(item => [item.id, item.lane]), [['a', 0], ['b', 0]])
+	assert.equal(timelineLaneCount(laidOut), 1)
+})
+
 
 test('uses laneGapMs to add spacing between items in the same lane', () => {
 	const items = [

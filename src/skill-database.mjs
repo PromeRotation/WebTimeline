@@ -121,7 +121,7 @@ const DEFAULT_DETAILS = {
 	3636: {description: '一定时间内，将自身所受的伤害减轻30% 持续时间：15秒'},
 	3638: {description: '受到致命伤也不会陷入无法战斗状态，代价是自身体力降为1'},
 	7393: {description: '为自身或一名队员附加能够抵御一定伤害的防护罩'},
-	16471: {description: '一定时间内，令自身和周围队员所受到的物理伤害减轻5%、魔法伤害减轻10%'},
+	16471: {description: '一定时间内，令自身和周围队员所受到的物理伤害减轻5%、魔法伤害减轻10%', recast: 90000},
 	25754: {description: '令自身或一名队员受到的伤害减轻10%'},
 	36927: {description: '一定时间内，将自身所受的伤害减轻40%'},
 	137: {description: '令目标体力持续恢复 恢复力：250 持续时间：18秒'},
@@ -165,6 +165,20 @@ const EFFECT_DURATION_OVERRIDES_MS = new Map([
 	[25862, 20000],
 	[36927, 15000],
 	[37011, 10000],
+])
+const RECAST_OVERRIDES_MS = new Map([
+	[7531, 90000],
+	[7533, 30000],
+	[7535, 60000],
+	[7537, 120000],
+	[3634, 120000],
+	[3636, 120000],
+	[3638, 300000],
+	[7390, 60000],
+	[7393, 15000],
+	[16471, 90000],
+	[25754, 60000],
+	[36927, 120000],
 ])
 
 export function buildSkillDatabase(source = {}) {
@@ -290,7 +304,7 @@ function actionRecord(item, detail = {}) {
 		category: actionCategoryName(item.t ?? detail.category),
 		level: Number(item.l ?? detail.level ?? 0),
 		castMs: Number(detail.cast ?? 0),
-		recastMs: Number(detail.recast ?? 0),
+		recastMs: recastMsForAction(item, detail),
 		gcd: Boolean(detail.gcd ?? (Number(item.t) === 2 || Number(item.t) === 3)),
 	}
 	const classification = classifyActionData(data, data.name)
@@ -343,6 +357,15 @@ function effectDurationForAction(action, description = '') {
 		return override
 	}
 	return extractEffectDurationMs(description)
+}
+
+function recastMsForAction(item = {}, detail = {}) {
+	const id = Number(item.i ?? detail.id)
+	const override = RECAST_OVERRIDES_MS.get(id)
+	if (override) {
+		return override
+	}
+	return Number(detail.recast ?? 0)
 }
 
 function extractEffectDurationMs(description = '') {

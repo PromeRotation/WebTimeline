@@ -9,6 +9,7 @@ const {
 	timeline,
 	packages,
 	acrSources,
+	runtimeSources,
 	bossTimeline,
 } = await loadPrototypeInputs()
 const fallbackSimulation = buildKanoDrkSimulation(buildSkillDatabase(), {durationMs: bossTimeline?.source?.lastSecond ? Math.round(bossTimeline.source.lastSecond * 1000) : 720000})
@@ -21,7 +22,7 @@ try {
 }
 const skillDatabase = buildSkillDatabase(skillSource ?? {})
 const sourceOpener = await loadKanoDrkSourceOpener(skillDatabase)
-const model = createPrototypeModel(timeline, packages, bossTimeline, {acrSources, skillDatabase, sourceOpener})
+const model = createPrototypeModel(timeline, packages, bossTimeline, {acrSources, runtimeSources, skillDatabase, sourceOpener})
 
 await mkdir('public/data', {recursive: true})
 await writeFile('public/data/prototype.json', JSON.stringify(model, null, 2), 'utf8')

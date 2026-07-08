@@ -101,6 +101,26 @@ export async function discoverAcrSources(relativeOrAbsoluteRoot = '../资源/dat
 	return mergeAcrSources(sources)
 }
 
+export async function discoverPromeRotationSource(relativeOrAbsolutePath = '../资源/source/PromeRotation-1.0') {
+	const root = resolveProjectPath(relativeOrAbsolutePath)
+	const catalogPath = path.join(root, 'PromeRotation', 'ACRDownload', 'AcrDownloadModels.cs')
+	const catalog = await readFile(catalogPath, 'utf8')
+	const catalogJobs = [...catalog.matchAll(/new\(\(uint\)Job\.([A-Z]{3}),\s*"([A-Z]{3})"/g)]
+		.map(match => match[2])
+	const jobs = COMBAT_JOBS
+		.filter(job => job.role !== 'Limited' && catalogJobs.includes(job.id))
+		.map(job => job.id)
+
+	return {
+		package: 'PromeRotation',
+		jobs,
+		source: 'PR 本体源码',
+		kind: 'runtime',
+		author: 'PromeRotation',
+		path: root,
+	}
+}
+
 export async function discoverSourceAcr(relativeOrAbsolutePath) {
 	const root = resolveProjectPath(relativeOrAbsolutePath)
 	const projectEntries = await readdir(root, {withFileTypes: true})
@@ -182,20 +202,26 @@ function mergeAcrSources(sources) {
 
 async function readManifest(root) {
 	try {
-		return JSON.parse(await readFile(path.join(root, 'decompile-manifest.json'), 'utf8'))
+		const text = await readFile(path.join(root, 'decompile-manifest.json'), 'utf8')
+		return JSON.parse(text.replace(/^\uFEFF/, ''))
 	} catch {
 		return []
 	}
 }
 
 function packageNameForDirectory(directoryName, manifest) {
-	const normalized = normalizePathForMatching(directoryName)
-	const matched = manifest.find(item => normalizePathForMatching(item.output ?? '').includes(normalized))
+	const matched = manifestEntryForDirectory(directoryName, manifest)
 	if (matched?.package) {
 		return matched.package
 	}
 	const [prefix] = directoryName.split('_')
 	return prefix || directoryName
+}
+
+function manifestEntryForDirectory(directoryName, manifest) {
+	const normalized = normalizePathForMatching(directoryName)
+	const matched = manifest.find(item => normalizePathForMatching(item.output ?? '').includes(normalized))
+	return matched
 }
 
 function normalizePathForMatching(value = '') {
