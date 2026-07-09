@@ -410,8 +410,11 @@ test('calibrates simulated damage from a large FFLogs sample instead of using fi
 test('real FFLogs comparison stays near the parsed simulated axis without uptime double-penalty', async () => {
 	const payload = JSON.parse(await readFile(new URL('../data/fflogs-cache/VHqxznv6bFcMPpLm-fight-10.json', import.meta.url), 'utf8'))
 	const model = JSON.parse(await readFile(new URL('../public/data/prototype.json', import.meta.url), 'utf8'))
+	const modelSimulationEvents = model.tracks?.expert?.simulated?.length
+		? model.tracks.expert.simulated
+		: model.acrSimulation?.events ?? []
 	const simulatedEvents = [
-		...(model.tracks?.expert?.simulated ?? model.acrSimulation?.events ?? []),
+		...modelSimulationEvents,
 		...((model.tracks?.expert?.player ?? []).filter(event => !event.output && event.source !== 'KANO ACR' && !event.simulated)),
 	]
 

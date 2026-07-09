@@ -22,7 +22,7 @@ try {
 }
 const skillDatabase = buildSkillDatabase(skillSource ?? {})
 const sourceOpener = await loadKanoDrkSourceOpener(skillDatabase)
-const model = createPrototypeModel(timeline, packages, bossTimeline, {acrSources, runtimeSources, skillDatabase, sourceOpener})
+const model = createPrototypeModel(timeline, packages, bossTimeline, {acrSources, runtimeSources, skillDatabase, sourceOpener, blankPlayerTimeline: true})
 
 await mkdir('public/data', {recursive: true})
 await writeFile('public/data/prototype.json', JSON.stringify(model, null, 2), 'utf8')

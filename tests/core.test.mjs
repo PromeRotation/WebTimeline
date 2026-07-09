@@ -124,12 +124,78 @@ test('builds complete combat job ACR data from discovered ACR support', () => {
 test('discovers job support from decompiled ACR folders', async () => {
 	const sources = await discoverAcrSources('../资源/data/decompiled')
 	const byPackage = new Map(sources.map(source => [source.package, source.jobs]))
+	const kano = sources.find(source => source.package === 'KANO')
 
 	assert.deepEqual(byPackage.get('Ahxq').sort(), ['DNC', 'MCH', 'VPR'])
+	assert.deepEqual(kano.jobs, ['DRK'])
+	assert.ok(kano.qtControls.DRK.length > 0)
 	assert.ok(byPackage.get('MilkVio').includes('WHM'))
 	assert.ok(byPackage.get('MilkVio').includes('PCT'))
 	assert.deepEqual(byPackage.get('XSZYYS'), ['PLD', 'WAR', 'DRK'])
 	assert.ok(byPackage.get('Wotou').includes('BRD'))
+})
+
+test('discovers QT controls from decompiled ACR source strings', async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), 'webtimeline-acr-qt-'))
+	try {
+		const acrDir = path.join(root, 'SampleViper_SampleViper_decompiled', 'Sample', 'Viper')
+		await mkdir(acrDir, {recursive: true})
+		await writeFile(path.join(acrDir, 'SampleViperRotation.cs'), `
+using System.Collections.Generic;
+
+namespace Sample.Viper;
+
+public class SampleViperRotation
+{
+	public static string Wardens = "Wardens";
+
+	public static IReadOnlyDictionary<string, bool> QtList { get; } = new Dictionary<string, bool>
+	{
+		{ "AOE", true },
+		{ "Burst Potion", false }
+	};
+
+	public void Check()
+	{
+		if (PromeSettings.Instance.GetQt("Hold")) {}
+		PromeSettings.Instance.SetQt("Dump Resources", false);
+	}
+}
+`, 'utf8')
+
+		const sources = await discoverAcrSources(root)
+		const source = sources.find(item => item.package === 'SampleViper')
+		const controls = source.qtControls.VPR
+
+		assert.deepEqual(source.jobs, ['VPR'])
+		assert.deepEqual(controls.map(item => item.name).sort(), ['AOE', 'Burst Potion', 'Dump Resources', 'Hold', 'Wardens'].sort())
+		assert.equal(controls.find(item => item.name === 'AOE').defaultEnabled, true)
+		assert.equal(controls.find(item => item.name === 'Burst Potion').defaultEnabled, false)
+		assert.equal(controls.find(item => item.name === 'Hold').defaultEnabled, false)
+	} finally {
+		await rm(root, {recursive: true, force: true})
+	}
+})
+
+test('builds per-ACR QT controls into the ACR database', () => {
+	const db = buildAcrDatabase(['SampleViper'], [
+		{
+			package: 'SampleViper',
+			jobs: ['VPR'],
+			source: 'ACR data',
+			qtControls: {
+				VPR: [
+					{name: 'AOE', defaultEnabled: true, sourceFile: 'SampleViperRotation.cs'},
+					{name: 'Burst Potion', defaultEnabled: false, sourceFile: 'SampleViperRotation.cs'},
+				],
+			},
+		},
+	])
+	const viper = db.jobs.find(job => job.id === 'VPR')
+	const acr = viper.acrs.find(item => item.name === 'SampleViper')
+
+	assert.deepEqual(acr.qtControls.map(item => item.name), ['AOE', 'Burst Potion'])
+	assert.equal(acr.qtControls[0].defaultEnabled, true)
 })
 
 test('discovers the PromeRotation main source from the official job catalog', async () => {
@@ -195,6 +261,23 @@ test('classifies Garland-backed skills so mitigation and invuln actions are not 
 	assert.equal(classifyAction(7531, '高优 铁壁', skillDatabase).type, 'mitigation')
 	assert.equal(classifyAction(16467, '暗黑锋', skillDatabase).potency, 300)
 	assert.equal(classifyAction(16467, '暗黑锋', skillDatabase).output, true)
+})
+
+test('classifies Machinist Dismantle as mitigation', () => {
+	const skillDatabase = buildSkillDatabase({
+		browse: [
+			{i: 2887, n: '\u6b66\u88c5\u89e3\u9664', c: 2908, j: 31, t: 4, l: 62},
+		],
+		details: {
+			2887: {description: '\u76ee\u6807\u653b\u51fb\u9020\u6210\u7684\u4f24\u5bb3\u964d\u4f4e10% \u6301\u7eed\u65f6\u95f4\uff1a10\u79d2'},
+		},
+	})
+	const classification = classifyAction(2887, '\u6b66\u88c5\u89e3\u9664', skillDatabase)
+
+	assert.equal(skillDatabase.actionsById[2887].type, 'mitigation')
+	assert.equal(classification.type, 'mitigation')
+	assert.equal(classification.output, false)
+	assert.equal(classification.effectDurationMs, 10000)
 })
 
 test('extracts coverage durations for mitigation and healer-over-time actions', () => {
@@ -329,6 +412,18 @@ test('adds the timeline opener as a detail panel beside mitigation, damage and p
 	assert.equal(openerPanel.source, 'ACR 源码')
 	assert.deepEqual(openerPanel.events.slice(0, 6).map(event => event.actionId), [3617, 44162, 16470, 3623, 16472, 7531])
 	assert.ok(openerPanel.events.some(event => event.iconUrl))
+	assert.deepEqual(model.acrOpeners.DRK.events.slice(0, 6).map(event => event.actionId), [3617, 44162, 16470, 3623, 16472, 7531])
+})
+
+test('keeps source ACR opener templates available when the default editor opens boss-only', async () => {
+	const fixture = await loadFixture(KANO_FIXTURE)
+	const sourceOpener = await loadKanoDrkSourceOpener(buildSkillDatabase())
+	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'], null, {sourceOpener, blankPlayerTimeline: true})
+	const openerPanel = model.detailPanels.find(panel => panel.id === 'opener')
+
+	assert.equal(openerPanel.events.length, 0)
+	assert.equal(model.acrOpeners.DRK.source.name, 'MT妖星乱舞100级起手')
+	assert.deepEqual(model.acrOpeners.DRK.events.slice(0, 6).map(event => event.actionId), [3617, 44162, 16470, 3623, 16472, 7531])
 })
 
 test('creates a front-end model for the first WebTimeline prototype', async () => {
@@ -348,6 +443,31 @@ test('prototype model omits the retired onboarding flow', async () => {
 	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'])
 
 	assert.equal(model.onboarding, undefined)
+})
+
+test('can create a boss-only blank player timeline for the default editor', async () => {
+	const fixture = await loadFixture(KANO_FIXTURE)
+	const model = createPrototypeModel(fixture, ['KANO', 'MilkVio', 'Nag0mi'], null, {blankPlayerTimeline: true})
+
+	assert.ok(model.tracks.expert.boss.length > 0)
+	assert.deepEqual(model.tracks.expert.player, [])
+	assert.deepEqual(model.tracks.expert.mitigation, [])
+	assert.deepEqual(model.tracks.expert.burst, [])
+	assert.deepEqual(model.tracks.expert.qt, [])
+	assert.deepEqual(model.tracks.expert.simulated, [])
+	assert.deepEqual(model.tracks.beginner.mitigation, [])
+	assert.deepEqual(model.tracks.beginner.burst, [])
+	assert.deepEqual(model.tracks.beginner.qt, [])
+	assert.deepEqual(model.tracks.beginner.simulated, [])
+	assert.deepEqual(model.detailPanels.map(panel => [panel.id, panel.events.length]), [
+		['mitigation', 0],
+		['damage', 0],
+		['potion', 0],
+		['opener', 0],
+	])
+	assert.equal(model.damage.events.length, 0)
+	assert.equal(model.damage.average.total, 0)
+	assert.equal(model.sourceTimeline, null)
 })
 
 test('builds xivanalysis-style rows and positioned items for the main timeline panel', async () => {

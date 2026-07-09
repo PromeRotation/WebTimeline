@@ -1,66 +1,92 @@
+const TIMELINE_IMPORT_KINDS = {
+	trigger: Object.freeze({id: 'trigger', label: '传统触发轴'}),
+	ptl: Object.freeze({id: 'ptl', label: 'PTL 时间轴'}),
+	unknown: Object.freeze({id: 'unknown', label: '未知时间轴'}),
+}
+
+export function detectTimelineImportKind(timelineJson = {}) {
+	if (!timelineJson || typeof timelineJson !== 'object') {
+		return TIMELINE_IMPORT_KINDS.unknown
+	}
+	if (timelineJson.Root || timelineJson.root) {
+		return TIMELINE_IMPORT_KINDS.trigger
+	}
+	if (Array.isArray(timelineJson.Anchors ?? timelineJson.anchors) || Array.isArray(timelineJson.Entries ?? timelineJson.entries)) {
+		return TIMELINE_IMPORT_KINDS.ptl
+	}
+	return TIMELINE_IMPORT_KINDS.unknown
+}
+
 export function flattenPrTimeline(timelineJson, options = {}) {
 	const events = []
 	let sequence = 0
-	let currentPhase = 'P1'
-	let currentPhaseStartMs = 0
+	const initialContext = {
+		phase: options.initialPhase ?? 'P1',
+		phaseStartMs: Number(options.initialPhaseStartMs ?? 0),
+	}
 	const actionReadyAtMs = new Map()
 	const runtimeOptions = {...options, actionCooldownReadyMs}
+	const eventIdPrefix = options.eventIdPrefix ?? 'import'
 
-	function pushEvent(timeMs, event) {
+	function pushEvent(timeMs, event, context) {
 		if (!event) {
 			return
 		}
 		events.push({
-			id: `import-${++sequence}`,
-			phase: currentPhase,
-			phaseStartMs: currentPhaseStartMs,
+			id: `${eventIdPrefix}-${++sequence}`,
+			phase: context.phase,
+			phaseStartMs: context.phaseStartMs,
 			timeMs,
 			...event,
 		})
 	}
 
-	function walk(node, cursorMs) {
+	function walk(node, cursorMs, context = initialContext) {
 		if (!node || node.Enabled === false) {
-			return walkResult(cursorMs)
+			return walkResult(cursorMs, false, context)
 		}
 
 		const type = nodeType(node)
+		let nextContext = context
 		const phaseMatch = /^(P\d+)/i.exec(node.Name ?? '')
 		if (phaseMatch) {
-			currentPhase = phaseMatch[1].toUpperCase()
-			currentPhaseStartMs = cursorMs
+			nextContext = {
+				...context,
+				phase: phaseMatch[1].toUpperCase(),
+				phaseStartMs: cursorMs,
+			}
 		}
 
 		if (type === 'delay') {
 			const durationMs = Number(node.DelayMs ?? 0)
 			const nextMs = cursorMs + durationMs
-			pushEvent(nextMs, options.delayEvent?.({node, durationMs}))
-			return walkResult(nextMs)
+			pushEvent(nextMs, options.delayEvent?.({node, durationMs}), nextContext)
+			return walkResult(nextMs, false, nextContext)
 		}
 
 		if (type === 'condition') {
 			const {timeMs, resolved} = resolveConditionNodeTimeMs(node, cursorMs, runtimeOptions)
 			const conditions = nodeConditions(node)
 			if (!resolved.length && conditionMode(node) === 'wait' && conditions.length && shouldBlockOnUnresolvedCondition(node, conditions, options)) {
-				return walkResult(cursorMs, true)
+				return walkResult(cursorMs, true, nextContext)
 			}
 			for (const item of resolved) {
-				pushEvent(item.timeMs, options.conditionEvent?.({node, condition: item.condition, timeMs: item.timeMs}))
+				pushEvent(item.timeMs, options.conditionEvent?.({node, condition: item.condition, timeMs: item.timeMs}), nextContext)
 			}
-			return walkResult(timeMs)
+			return walkResult(timeMs, false, nextContext)
 		}
 
 		if (type === 'branch') {
 			const activeIndex = resolveBranchActiveIndex(node, cursorMs, runtimeOptions)
 			const child = (node.Children ?? [])[activeIndex]
-			return child ? walk(child, cursorMs) : walkResult(cursorMs)
+			return child ? walk(child, cursorMs, nextContext) : walkResult(cursorMs, false, nextContext)
 		}
 
 		if (type === 'action') {
 			for (const action of nodeActions(node)) {
 				const actionEvents = options.actionEvents?.({node, action, timeMs: cursorMs}) ?? []
 				for (const event of actionEvents) {
-					pushEvent(cursorMs, event)
+					pushEvent(cursorMs, event, nextContext)
 				}
 				recordActionCooldown(action, cursorMs)
 			}
@@ -70,24 +96,27 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 		if (type === 'parallel') {
 			let endMs = cursorMs
 			for (const child of children) {
-				const result = walk(child, cursorMs)
+				const result = walk(child, cursorMs, nextContext)
 				endMs = Math.max(endMs, result.timeMs)
 			}
-			return walkResult(endMs)
+			return walkResult(endMs, false, nextContext)
 		}
 
 		let nextMs = cursorMs
+		let childContext = nextContext
 		for (const child of children) {
-			const result = walk(child, nextMs)
+			const result = walk(child, nextMs, childContext)
 			if (result.blocked) {
 				return result
 			}
 			nextMs = result.timeMs
+			childContext = result.context
 		}
-		return walkResult(nextMs)
+		return walkResult(nextMs, false, childContext)
 	}
 
-	const result = walk(timelineJson.Root, 0)
+	const root = timelineJson?.Root ?? timelineJson?.root
+	const result = walk(root, Number(options.initialTimeMs ?? 0), initialContext)
 	return {events, endMs: result.timeMs}
 
 	function recordActionCooldown(action, timeMs) {
@@ -115,6 +144,72 @@ export function flattenPrTimeline(timelineJson, options = {}) {
 		}
 		const readyMs = Number(actionReadyAtMs.get(actionId) ?? cursorMs)
 		return Math.max(Number(cursorMs ?? 0), readyMs)
+	}
+}
+
+export function flattenPtlTimeline(timelineJson, options = {}) {
+	const anchors = ptlArray(timelineJson, 'Anchors')
+	const entries = ptlArray(timelineJson, 'Entries')
+	const functionalAnchors = anchors
+		.filter(anchor => !ptlBool(anchor, 'IsCommentAnchor') && !ptlBool(anchor, 'IsTechnicalAnchor'))
+		.sort((left, right) => ptlNumber(left, 'Time') - ptlNumber(right, 'Time') || ptlString(left, 'Guid').localeCompare(ptlString(right, 'Guid')))
+	const events = []
+	let sequence = 0
+	let endMs = Math.max(...functionalAnchors.map(anchor => secondsToMs(ptlNumber(anchor, 'Time'))), 0)
+	let currentPhase = 'P1'
+	let currentPhaseStartMs = 0
+	let phaseIndex = 1
+
+	for (let index = 0; index < functionalAnchors.length - 1; index += 1) {
+		const startAnchor = functionalAnchors[index]
+		const endAnchor = functionalAnchors[index + 1]
+		const startTimeSeconds = ptlNumber(startAnchor, 'Time')
+		const endTimeSeconds = ptlNumber(endAnchor, 'Time')
+		const segmentDurationSeconds = endTimeSeconds - startTimeSeconds
+		if (segmentDurationSeconds <= 0) {
+			continue
+		}
+		if (ptlBool(startAnchor, 'IsPhaseAnchor') || index === 0) {
+			const nextPhase = phaseNameForAnchor(startAnchor, phaseIndex)
+			if (nextPhase !== currentPhase || index === 0) {
+				currentPhase = nextPhase
+				phaseIndex += 1
+			}
+			currentPhaseStartMs = secondsToMs(startTimeSeconds)
+		}
+		const segmentEntries = entries
+			.filter(entry => ptlEnabled(entry) && sameGuid(ptlString(entry, 'StartAnchorGuid'), ptlString(startAnchor, 'Guid')))
+			.sort((left, right) => ptlNumber(left, 'Offset') - ptlNumber(right, 'Offset') || ptlString(left, 'Guid').localeCompare(ptlString(right, 'Guid')))
+		for (const entry of segmentEntries) {
+			const offsetSeconds = ptlNumber(entry, 'Offset')
+			if (offsetSeconds < 0 || offsetSeconds >= segmentDurationSeconds) {
+				options.warning?.({kind: 'ptl-entry-out-of-bounds', entry, startAnchor, endAnchor})
+				continue
+			}
+			const entryStartMs = secondsToMs(startTimeSeconds + offsetSeconds)
+			const entryGroup = ptlValue(entry, 'EntryGroup') ?? ptlValue(entry, 'EntryGroupDef') ?? {Type: 'serial', Enabled: true}
+			const result = flattenPrTimeline({Root: entryGroup}, {
+				...options,
+				initialTimeMs: entryStartMs,
+				initialPhase: currentPhase,
+				initialPhaseStartMs: currentPhaseStartMs,
+				eventIdPrefix: `ptl-${++sequence}`,
+			})
+			for (const event of result.events) {
+				events.push({
+					...event,
+					ptlEntryName: ptlString(entry, 'Name'),
+					ptlEntryGuid: ptlString(entry, 'Guid'),
+					sourceKind: 'ptl',
+				})
+			}
+			endMs = Math.max(endMs, result.endMs)
+		}
+	}
+
+	return {
+		events: events.sort((left, right) => eventTimeMs(left) - eventTimeMs(right)),
+		endMs,
 	}
 }
 
@@ -228,8 +323,8 @@ function isCooldownReadyWait(condition = {}) {
 	return (mode === '<=' || mode === '<') && value <= 0
 }
 
-function walkResult(timeMs, blocked = false) {
-	return {timeMs, blocked}
+function walkResult(timeMs, blocked = false, context = null) {
+	return {timeMs, blocked, context}
 }
 
 function nodeConditions(node = {}) {
@@ -284,10 +379,18 @@ function normalizedPhaseEventTimeMs(timeMs, originalPhaseStartMs, phase) {
 	if (Number.isFinite(originalPhaseStartMs) && originalPhaseStartMs > 0 && Math.abs(originalPhaseStartMs - phase.startMs) > 1) {
 		return phase.startMs + Math.max(0, timeMs - originalPhaseStartMs)
 	}
-	if (timeMs < phase.startMs && phase.startMs - timeMs > 30000) {
+	if (timeMs < phase.startMs && phase.startMs - timeMs > 30000 && looksPhaseRelativeTimeMs(timeMs, phase)) {
 		return phase.startMs + timeMs
 	}
 	return timeMs
+}
+
+function looksPhaseRelativeTimeMs(timeMs, phase) {
+	const phaseDurationMs = Math.max(0, Number(phase.endMs ?? 0) - Number(phase.startMs ?? 0))
+	if (phaseDurationMs > 0) {
+		return timeMs <= phaseDurationMs + 30000
+	}
+	return timeMs <= 300000
 }
 
 function eventTimeMs(event = {}) {
@@ -318,4 +421,50 @@ function phaseWindowsById(bossSource = null) {
 function normalizedPhaseId(phase) {
 	const match = /^p?(\d+)$/i.exec(String(phase ?? '').trim())
 	return match ? `p${match[1]}` : ''
+}
+
+function ptlValue(object = {}, pascalName) {
+	const camelName = pascalName.charAt(0).toLowerCase() + pascalName.slice(1)
+	return object?.[pascalName] ?? object?.[camelName]
+}
+
+function ptlArray(object = {}, pascalName) {
+	const value = ptlValue(object, pascalName)
+	return Array.isArray(value) ? value : []
+}
+
+function ptlString(object = {}, pascalName) {
+	const value = ptlValue(object, pascalName)
+	return value == null ? '' : String(value)
+}
+
+function ptlNumber(object = {}, pascalName) {
+	const value = Number(ptlValue(object, pascalName) ?? 0)
+	return Number.isFinite(value) ? value : 0
+}
+
+function ptlBool(object = {}, pascalName) {
+	return Boolean(ptlValue(object, pascalName))
+}
+
+function ptlEnabled(object = {}) {
+	const value = ptlValue(object, 'Enabled')
+	return value !== false
+}
+
+function sameGuid(left, right) {
+	return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase()
+}
+
+function secondsToMs(seconds) {
+	return Math.round(Number(seconds ?? 0) * 1000)
+}
+
+function phaseNameForAnchor(anchor = {}, fallbackIndex = 1) {
+	const name = ptlString(anchor, 'Name')
+	const match = /(?:^|[^a-z0-9])p\s*([0-9]+)/i.exec(name)
+	if (match) {
+		return `P${match[1]}`
+	}
+	return `P${fallbackIndex}`
 }

@@ -137,6 +137,7 @@ const DEFAULT_DETAILS = {
 
 const DEFAULT_DETAIL_IDS = Object.keys(DEFAULT_DETAILS).map(Number)
 const ACTION_CLASSIFICATION_OVERRIDES = new Map([
+	[2887, {type: 'mitigation', output: false, potency: 0, effectDurationMs: 10000}],
 	[24298, {type: 'mitigation', output: false, potency: 0, effectDurationMs: 15000}],
 	[24300, {type: 'healing', output: false, potency: 0, effectDurationMs: 30000}],
 	[24302, {type: 'healing', output: false, potency: 0, effectDurationMs: 15000}],

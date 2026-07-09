@@ -24,7 +24,9 @@ import {
 } from './timeline-view.js'
 import {
 	collectBossCastItems,
+	detectTimelineImportKind,
 	flattenPrTimeline,
+	flattenPtlTimeline,
 	normalizePhaseTaggedEvents,
 	resolveBossCastConditionTimeMs,
 } from './timeline-import-parser.js'
@@ -816,13 +818,14 @@ const state = {
 	showFocusPicker: false,
 	showAcrModal: false,
 	showAboutModal: false,
-	showAcrSimulation: localStorage.getItem('webtimelineShowAcrSimulation') !== '0',
+	showAcrSimulation: localStorage.getItem('webtimelineShowAcrSimulation') === '1',
 	editorMode: 'browse',
 	section: 'timeline',
 	insertFloatPos: loadInsertFloatPos(),
 	timelineZoom: clampTimelineZoom(localStorage.getItem('webtimelineTimelineZoom') ?? 1.65),
 	currentTimelineJson: null,
 	baseAcrSimulation: null,
+	baseAcrOpeners: {},
 	fflogsUrl: 'https://www.fflogs.com/reports/VHqxznv6bFcMPpLm?fight=10&type=damage-done',
 	fflogsComparison: null,
 	fflogsActorId: '',
@@ -917,6 +920,7 @@ let suppressTimelineClick = false
 let insertFloatDrag = null
 let suppressInsertFloatClick = false
 let insertSkillDrag = null
+let existingTimelineEventDrag = null
 let suppressInsertSkillClick = false
 let timelineDragGuideFrame = null
 let timelineDragGuidePending = null
@@ -933,6 +937,7 @@ async function init() {
 	const response = await fetch(assetUrl('data/prototype.json'))
 	state.model = await response.json()
 	state.baseAcrSimulation = state.model.acrSimulation
+	state.baseAcrOpeners = state.model.acrOpeners ?? {}
 	state.currentTimelineJson = state.model.sourceTimeline ?? null
 	render()
 }
@@ -1407,6 +1412,13 @@ document.addEventListener('pointerdown', event => {
 		return
 	}
 
+	const timelineEvent = event.target instanceof Element ? event.target.closest('[data-timeline-event-key]') : null
+	if (timelineEvent && canStartExistingTimelineEventDrag(timelineEvent, event)) {
+		startExistingTimelineEventDrag(event, timelineEvent)
+		timelineEvent.setPointerCapture?.(event.pointerId)
+		return
+	}
+
 	const insertHandle = event.target instanceof Element ? event.target.closest('[data-insert-float-handle], [data-insert-panel-handle]') : null
 	if (insertHandle && canEditTimeline()) {
 		if (insertHandle.matches('[data-insert-panel-handle]') && event.target.closest('button, input, select, textarea, label')) {
@@ -1435,6 +1447,11 @@ document.addEventListener('pointerdown', event => {
 document.addEventListener('pointermove', event => {
 	if (insertSkillDrag && insertSkillDrag.pointerId === event.pointerId) {
 		moveInsertSkillDrag(event)
+		return
+	}
+
+	if (existingTimelineEventDrag && existingTimelineEventDrag.pointerId === event.pointerId) {
+		moveExistingTimelineEventDrag(event)
 		return
 	}
 
@@ -1467,11 +1484,13 @@ document.addEventListener('pointermove', event => {
 
 document.addEventListener('pointerup', event => {
 	endInsertSkillDrag(event)
+	endExistingTimelineEventDrag(event)
 	endInsertFloatDrag(event)
 	endTimelineDrag(event)
 })
 document.addEventListener('pointercancel', event => {
 	cancelInsertSkillDrag(event)
+	cancelExistingTimelineEventDrag(event)
 	endInsertFloatDrag(event)
 	endTimelineDrag(event)
 })
@@ -1836,7 +1855,7 @@ function renderTopbar(model) {
 			<div class="topbar-main">
 				<div class="topbar-title">
 					<div class="topbar-meta">
-						<p class="eyebrow">Territory ${model.encounter.territoryId} / ${model.encounter.job}</p>
+						<p class="eyebrow" data-timeline-kind="${escapeHtml(model.encounter.timelineKindLabel ?? '默认白轴')}">Territory ${model.encounter.territoryId} / ${model.encounter.job} / ${escapeHtml(model.encounter.timelineKindLabel ?? '默认白轴')}</p>
 						${renderJobAcrStatus(model, selectedJob)}
 					</div>
 					<h2>${model.encounter.name}</h2>
@@ -1866,7 +1885,7 @@ function renderTopbar(model) {
 			<button class="ghost" data-action="import-timeline">${t('action.import')}</button>
 			<button class="ghost" data-action="export-timeline">${t('action.export')}</button>
 			${renderLanguageSwitcher()}
-			<input class="hidden-file-input" type="file" accept=".json,application/json" data-field="timeline-import">
+			<input class="hidden-file-input" type="file" accept=".json,.ptl,application/json" data-field="timeline-import">
 			</div>
 		</header>
 	`
@@ -2289,7 +2308,7 @@ function insertQtControls(track) {
 			qtIndex: index,
 		}))
 	}
-	return (timelineQtEvents(track) ?? []).map((event, index) => {
+	const timelineItems = (timelineQtEvents(track) ?? []).map((event, index) => {
 		const name = event.name ?? event.label ?? 'QT 控制'
 		const defaultEnabled = Boolean(event.defaultEnabled ?? event.enabled ?? false)
 		const enabled = Boolean(event.nextEnabled ?? !defaultEnabled)
@@ -2308,6 +2327,14 @@ function insertQtControls(track) {
 			qtIndex: index,
 		}
 	})
+	if (timelineItems.length) {
+		return timelineItems
+	}
+	const acrItems = acrQtControlsForCurrentSelection()
+	if (acrItems.length) {
+		return acrItems
+	}
+	return []
 }
 
 function qtStatePanelItems(track = {}) {
@@ -2364,6 +2391,33 @@ function qtStatePanelItems(track = {}) {
 				qtStates: [{Name: name, Enabled: enabled}],
 			}
 		})
+}
+
+function acrQtControlsForCurrentSelection() {
+	const job = state.model.acrDatabase.jobs.find(job => job.id === state.job)
+	const acr = job?.acrs.find(acr => acr.name === state.acr)
+		?? job?.acrs.find(acr => acr.enabled)
+		?? job?.acrs[0]
+	const controls = Array.isArray(acr?.qtControls) ? acr.qtControls : []
+	return controls.map((control, index) => {
+		const name = control.name ?? control.label ?? 'QT'
+		const defaultEnabled = Boolean(control.defaultEnabled)
+		return {
+			id: `qt-acr-${state.job}-${acr?.name ?? 'acr'}-${index}`,
+			type: 'qt-insert',
+			name,
+			label: control.label ?? name,
+			timeMs: 0,
+			source: acr.name,
+			qtSource: 'acr-database',
+			defaultEnabled,
+			nextEnabled: !defaultEnabled,
+			onCount: defaultEnabled ? 1 : 0,
+			offCount: defaultEnabled ? 0 : 1,
+			qtStates: [{Name: name, Enabled: !defaultEnabled}],
+			qtIndex: `acr-${state.job}-${acr?.name ?? 'acr'}-${index}`,
+		}
+	})
 }
 
 function qtDraftKey(event = {}) {
@@ -2555,6 +2609,7 @@ function buildVisualTimelineRows(track) {
 	const burstPackages = buildBurstPackageItems(track.burst ?? state.model.tracks.beginner?.burst ?? [])
 	const openerPanel = state.model.detailPanels.find(panel => panel.id === 'opener')
 	const openerItems = openerDetailEvents(openerPanel).map(event => timelineItemForEvent(event, {defaultType: event.potency > 0 ? 'gcd' : 'action'}))
+	const openerItemKeys = new Set(openerItems.map(timelineDisplayEventKey))
 	const focused = focusedSkillRows()
 	const bossCastRows = parsedBossCastRows.length
 		? parsedBossCastRows
@@ -2573,9 +2628,9 @@ function buildVisualTimelineRows(track) {
 	const rows = [
 		...bossRows,
 		{id: 'opener-actions', label: t('overview.opener'), accent: 'violet', keepWhenEmpty: true, items: openerItems},
-		{id: 'output-actions', label: t('rail.output'), accent: 'mint', keepWhenEmpty: true, items: buildOutputLaneItems(player, manual)},
-		{id: 'mitigation-actions', label: t('rail.mitigation'), accent: 'mint', keepWhenEmpty: true, items: buildMitigationLaneItems(mitigation, manual, simulatedMitigation)},
-		{id: 'burst-integration', label: t('rail.burst'), accent: 'orange', keepWhenEmpty: true, items: buildBurstLaneItems(burstPackages, manual)},
+		{id: 'output-actions', label: t('rail.output'), accent: 'mint', keepWhenEmpty: true, items: buildOutputLaneItems(player, manual, openerItemKeys)},
+		{id: 'mitigation-actions', label: t('rail.mitigation'), accent: 'mint', keepWhenEmpty: true, items: buildMitigationLaneItems(mitigation, manual, simulatedMitigation, openerItemKeys)},
+		{id: 'burst-integration', label: t('rail.burst'), accent: 'orange', keepWhenEmpty: true, items: buildBurstLaneItems(burstPackages, manual, openerItemKeys)},
 		{id: 'qt-controls', label: 'QT 控制', accent: 'sky', keepWhenEmpty: true, items: buildQtLaneItems(qtSource, manual)},
 		{id: 'acr-simulated', label: t('rail.acrSim'), accent: 'sky', items: simulatedOutput.map(event => timelineItemForEvent(event, {defaultType: event.output ? 'simulated-gcd' : 'simulated-action', simulated: true}))},
 		{id: 'focus-add', label: t('rail.focusAdd'), labelHtml: renderFocusAddLabel(), accent: 'sky', keepWhenEmpty: true, items: []},
@@ -2587,15 +2642,15 @@ function buildVisualTimelineRows(track) {
 		.map(row => row.groupId === 'boss' ? {...row, bossIndex: bossIndex++} : row)
 }
 
-function buildOutputLaneItems(player = [], manual = []) {
+function buildOutputLaneItems(player = [], manual = [], excludedDisplayKeys = new Set()) {
 	const playerItems = mainActionTimelineEvents(player)
 		.filter(event => !isBurstTimelineEvent(event))
 		.map(event => timelineItemForEvent(event, {defaultType: event.potency > 0 ? 'gcd' : 'action'}))
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'output')
-	return sortTimelineItems(uniqueTimelineDisplayEvents([...playerItems, ...manualItems]))
+	return sortTimelineItems(omitTimelineItemsWithKeys(uniqueTimelineDisplayEvents([...playerItems, ...manualItems]), excludedDisplayKeys))
 }
 
-function buildMitigationLaneItems(mitigation = [], manual = [], simulatedCoverage = []) {
+function buildMitigationLaneItems(mitigation = [], manual = [], simulatedCoverage = [], excludedDisplayKeys = new Set()) {
 	const mitigationItems = mitigation
 		.filter(event => timelineFunctionalLane(event) === 'mitigation')
 		.map(event => timelineItemForEvent(event, {defaultType: 'action'}))
@@ -2604,12 +2659,19 @@ function buildMitigationLaneItems(mitigation = [], manual = [], simulatedCoverag
 		.map(event => timelineItemForEvent(event, {defaultType: 'action', simulated: true}))
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'mitigation')
 	const imported = filterCooldownConflictingTimelineItems(uniqueTimelineDisplayEvents([...mitigationItems, ...manualItems]))
-	return sortTimelineItems(uniqueTimelineDisplayEvents([...imported, ...simulatedItems]))
+	return sortTimelineItems(uniqueTimelineDisplayEvents([...omitTimelineItemsWithKeys(imported, excludedDisplayKeys), ...simulatedItems]))
 }
 
-function buildBurstLaneItems(burstPackages = [], manual = []) {
+function buildBurstLaneItems(burstPackages = [], manual = [], excludedDisplayKeys = new Set()) {
 	const manualItems = manual.filter(event => timelineFunctionalLane(event) === 'burst')
-	return sortTimelineItems([...burstPackages, ...manualItems])
+	return sortTimelineItems(omitTimelineItemsWithKeys([...burstPackages, ...manualItems], excludedDisplayKeys))
+}
+
+function omitTimelineItemsWithKeys(items = [], excludedDisplayKeys = new Set()) {
+	if (!excludedDisplayKeys?.size) {
+		return items
+	}
+	return items.filter(item => !excludedDisplayKeys.has(timelineDisplayEventKey(item)))
 }
 
 function buildQtLaneItems(qtSource = [], manual = []) {
@@ -2789,6 +2851,10 @@ function canDropActionOnTimelineLane(actionId, dropLane) {
 		return false
 	}
 	return actionTimelineDropLane(actionId) === dropLane
+}
+
+function effectiveActionDropLane(actionId, dropLane) {
+	return dropLane === 'locked' ? actionTimelineDropLane(actionId) : dropLane
 }
 
 function canDropBurstPackageOnTimelineLane(dropLane) {
@@ -3576,15 +3642,19 @@ function checkCooldownConflict(actionId, requestedTimeMs, options = {}) {
 	const excludeId = options.excludeId
 	const baselineEvents = timelineCooldownBaselineEvents()
 	const allEvents = [
-		...baselineEvents.map(event => ({
-			id: event.id,
-			actionId: event.actionId,
-			timeMs: Number(event.timeMs ?? event.startMs ?? 0),
-			source: event.source ?? 'import',
-			name: event.name ?? event.label ?? '',
-		})),
+		...baselineEvents
+			.filter(item => item.id !== excludeId)
+			.filter(item => Number(item.timeMs ?? item.startMs ?? 0) <= requestedTimeMs)
+			.map(event => ({
+				id: event.id,
+				actionId: event.actionId,
+				timeMs: Number(event.timeMs ?? event.startMs ?? 0),
+				source: event.source ?? 'import',
+				name: event.name ?? event.label ?? '',
+			})),
 		...state.inserted
 			.filter(item => item.id !== excludeId)
+			.filter(item => Number(item.requestedTimeMs ?? item.timeMs ?? 0) <= requestedTimeMs)
 			.map(item => ({
 				id: item.id,
 				actionId: item.actionId,
@@ -4619,6 +4689,141 @@ function endInsertFloatDrag(event) {
 	insertFloatDrag = null
 }
 
+function canStartExistingTimelineEventDrag(timelineEvent, event) {
+	return canEditTimeline()
+		&& event.button === 0
+		&& Boolean(timelineEvent?.dataset?.timelineEventKey)
+		&& !event.target.closest('.timeline-delete-button, input, select, textarea, label')
+}
+
+function startExistingTimelineEventDrag(event, timelineEvent) {
+	const rect = timelineEvent.getBoundingClientRect()
+	existingTimelineEventDrag = {
+		pointerId: event.pointerId,
+		eventKey: timelineEvent.dataset.timelineEventKey,
+		card: timelineEvent,
+		startX: event.clientX,
+		startY: event.clientY,
+		offsetX: event.clientX - rect.left,
+		offsetY: event.clientY - rect.top,
+		width: rect.width,
+		height: rect.height,
+		label: timelineEvent.querySelector('span, strong')?.textContent?.trim() ?? timelineEvent.textContent?.trim() ?? '',
+		dragging: false,
+		ghost: null,
+		dropTarget: null,
+	}
+}
+
+function moveExistingTimelineEventDrag(event) {
+	const deltaX = event.clientX - existingTimelineEventDrag.startX
+	const deltaY = event.clientY - existingTimelineEventDrag.startY
+	if (!existingTimelineEventDrag.dragging && Math.hypot(deltaX, deltaY) > 5) {
+		existingTimelineEventDrag.dragging = true
+		existingTimelineEventDrag.card.classList.add('is-pointer-dragging')
+		existingTimelineEventDrag.ghost = createExistingTimelineEventDragGhost()
+		document.body.classList.add('is-insert-skill-dragging')
+	}
+	if (!existingTimelineEventDrag.dragging) {
+		return
+	}
+
+	event.preventDefault()
+	positionExistingTimelineEventDragGhost(event)
+	updateExistingTimelineEventDropTarget(findTimelineAtClientPoint(event.clientX, event.clientY))
+	updateExistingTimelineEventDragPreview(event)
+}
+
+function endExistingTimelineEventDrag(event) {
+	if (!existingTimelineEventDrag || existingTimelineEventDrag.pointerId !== event.pointerId) {
+		return
+	}
+	const wasDragging = existingTimelineEventDrag.dragging
+	const eventKey = existingTimelineEventDrag.eventKey
+	if (wasDragging) {
+		event.preventDefault()
+	}
+	cleanupExistingTimelineEventDrag(event, {suppressClick: wasDragging})
+	if (wasDragging) {
+		moveExistingTimelineEventAtClientPoint(eventKey, event.clientX, event.clientY)
+	}
+}
+
+function cancelExistingTimelineEventDrag(event) {
+	if (!existingTimelineEventDrag || existingTimelineEventDrag.pointerId !== event.pointerId) {
+		return
+	}
+	cleanupExistingTimelineEventDrag(event, {suppressClick: existingTimelineEventDrag.dragging})
+}
+
+function cleanupExistingTimelineEventDrag(event, {suppressClick = false} = {}) {
+	const card = existingTimelineEventDrag?.card
+	card?.releasePointerCapture?.(event.pointerId)
+	card?.classList.remove('is-pointer-dragging')
+	existingTimelineEventDrag?.ghost?.remove()
+	if (existingTimelineEventDrag?.dropTarget) {
+		hideTimelineDragGuide(existingTimelineEventDrag.dropTarget)
+	}
+	existingTimelineEventDrag?.dropTarget?.classList.remove('is-skill-drop-target')
+	document.body.classList.remove('is-insert-skill-dragging')
+	existingTimelineEventDrag = null
+	if (suppressClick) {
+		suppressInsertSkillClick = true
+		setTimeout(() => {
+			suppressInsertSkillClick = false
+		}, 0)
+	}
+}
+
+function createExistingTimelineEventDragGhost() {
+	const ghost = document.createElement('div')
+	ghost.className = 'skill-drag-ghost'
+	ghost.style.width = `${Math.round(existingTimelineEventDrag.width)}px`
+	ghost.style.minHeight = `${Math.round(existingTimelineEventDrag.height)}px`
+	ghost.innerHTML = renderDropTimePreview({
+		label: existingTimelineEventDrag.label || '调整技能',
+		overTimeline: false,
+	})
+	document.body.append(ghost)
+	return ghost
+}
+
+function positionExistingTimelineEventDragGhost(event) {
+	if (!existingTimelineEventDrag.ghost) {
+		return
+	}
+	existingTimelineEventDrag.ghost.style.left = `${event.clientX - existingTimelineEventDrag.offsetX}px`
+	existingTimelineEventDrag.ghost.style.top = `${event.clientY - existingTimelineEventDrag.offsetY}px`
+}
+
+function updateExistingTimelineEventDropTarget(target) {
+	const timeline = target?.classList?.contains('xiva-timeline') ? target : findTimeline(target)
+	if (timeline === existingTimelineEventDrag.dropTarget) {
+		return
+	}
+	existingTimelineEventDrag.dropTarget?.classList.remove('is-skill-drop-target')
+	existingTimelineEventDrag.dropTarget = timeline
+	existingTimelineEventDrag.dropTarget?.classList.add('is-skill-drop-target')
+	if (!timeline) {
+		hideTimelineDragGuide()
+	}
+}
+
+function updateExistingTimelineEventDragPreview(event) {
+	if (!existingTimelineEventDrag?.ghost) {
+		return
+	}
+	const timeline = findTimelineAtClientPoint(event.clientX, event.clientY)
+	if (timeline) {
+		scheduleTimelineDragGuide(timeline, event.clientX)
+	}
+	const info = dropTimeInfoForClientPoint(event.clientX, event.clientY, timelineDragGuideContext(timeline))
+	existingTimelineEventDrag.ghost.innerHTML = renderDropTimePreview({
+		label: existingTimelineEventDrag.label || '调整技能',
+		...info,
+	})
+}
+
 function canStartInsertSkillDrag(skillCard, event) {
 	return canEditTimeline()
 		&& event.button === 0
@@ -5372,7 +5577,7 @@ function manualEventsForPanel(panelId) {
 		return events.filter(event => event.kind === 'qt-control' || event.type === 'qt' || event.classification === 'qt')
 	}
 	if (panelId === 'opener') {
-		return events.filter(event => Number(event.timeMs ?? 0) <= 24000)
+		return events.filter(event => event.classification === 'opener' || event.opener === true)
 	}
 	return events
 }
@@ -6588,7 +6793,8 @@ function insertManualSkill() {
 
 function insertSkillAtTimeline(actionId, event, timeline) {
 	const dropLane = timelineDropLaneAtClientPoint(event.clientX, event.clientY) || timelineDropLaneForTarget(event.target)
-	if (!canDropActionOnTimelineLane(actionId, dropLane)) {
+	const effectiveDropLane = effectiveActionDropLane(actionId, dropLane)
+	if (!canDropActionOnTimelineLane(actionId, effectiveDropLane)) {
 		setImportError('这个技能不能放到当前功能行')
 		return
 	}
@@ -6607,7 +6813,8 @@ function insertSkillAtClientPoint(actionId, clientX, clientY) {
 		return false
 	}
 	const dropLane = timelineDropLaneAtClientPoint(clientX, clientY)
-	if (!canDropActionOnTimelineLane(actionId, dropLane)) {
+	const effectiveDropLane = effectiveActionDropLane(actionId, dropLane)
+	if (!canDropActionOnTimelineLane(actionId, effectiveDropLane)) {
 		setImportError('这个技能不能放到当前功能行')
 		return false
 	}
@@ -7046,6 +7253,16 @@ function moveManualSkillAtTimeline(manualId, event, timeline) {
 	render()
 }
 
+function moveExistingTimelineEventAtClientPoint(eventKey, clientX, clientY) {
+	const timeline = findTimelineAtClientPoint(clientX, clientY)
+	if (!timeline) {
+		setImportError('请把技能拖到时间轴上')
+		render()
+		return
+	}
+	moveExistingTimelineEventAtTimeline(eventKey, {clientX}, timeline)
+}
+
 function moveExistingTimelineEventAtTimeline(eventKey, event, timeline) {
 	if (!canEditTimeline()) {
 		return
@@ -7368,8 +7585,8 @@ async function importDefaultTimeline(sourceId) {
 			throw new Error(`导入失败：HTTP ${response.status}`)
 		}
 		const timelineJson = await response.json()
-		applyImportedTimeline(timelineJson, source.label)
-		setImportStatus(`已导入 ${source.label}`)
+		const imported = applyImportedTimeline(timelineJson, source.label)
+		setImportStatus(`已导入 ${source.label}（${imported.timelineKindLabel}）`)
 	} catch (error) {
 		setImportError(`导入 ${source.label} 失败：${errorMessage(error)}`)
 	}
@@ -7382,8 +7599,8 @@ async function importTimelineFile(file) {
 	setImportStatus(`正在导入 ${file.name}...`)
 	try {
 		const timelineJson = JSON.parse(await file.text())
-		applyImportedTimeline(timelineJson, file.name)
-		setImportStatus(`已导入 ${file.name}`)
+		const imported = applyImportedTimeline(timelineJson, file.name)
+		setImportStatus(`已导入 ${file.name}（${imported.timelineKindLabel}）`)
 	} catch (error) {
 		setImportError(`导入 ${file.name} 失败：${errorMessage(error)}`)
 	}
@@ -7409,6 +7626,8 @@ function applyImportedTimeline(timelineJson, sourceLabel = '本地导入') {
 		jobId: imported.jobNumericId,
 		job: imported.jobId,
 		opener: imported.opener,
+		timelineKind: imported.timelineKind,
+		timelineKindLabel: imported.timelineKindLabel,
 	}
 	model.tracks.beginner = {
 		...model.tracks.beginner,
@@ -7436,9 +7655,10 @@ function applyImportedTimeline(timelineJson, sourceLabel = '本地导入') {
 		...model.shareCard,
 		timelineName: imported.name,
 		title: '分享预览',
-		subtitle: `${sourceLabel} / ${imported.jobName} / ${imported.acrName}`,
+		subtitle: `${sourceLabel} / ${imported.timelineKindLabel} / ${imported.jobName} / ${imported.acrName}`,
 	}
 	render()
+	return imported
 }
 
 async function loadFflogsComparison(options = {}) {
@@ -7513,19 +7733,16 @@ function buildImportedTimelineModel(timelineJson, sourceLabel) {
 	if (timelineJson && timelineJson.schemaVersion === 1) {
 		return buildModelFromExportTimeline(timelineJson, sourceLabel)
 	}
+	const timelineKind = detectTimelineImportKind(timelineJson)
 	const meta = timelineJson.Meta ?? {}
 	const job = jobFromTimelineMeta(meta)
-	const events = flattenImportedTimeline(timelineJson)
+	const events = flattenImportedTimeline(timelineJson, timelineKind)
 	const tracks = buildImportedModeTracks(events)
 	const timelineRows = buildImportedTimelineRows(events)
 	const damageEvents = events.filter(event => event.output)
-	const openerEvents = events
-		.filter(event => event.kind === 'player-action' && event.timeMs <= 24000)
-		.map(event => ({
-			...event,
-			classification: event.classification ?? 'opener',
-			opener: true,
-		}))
+	const shouldBuildOpenerPanel = timelineKind.id !== 'ptl'
+	const importedOpenerEvents = shouldBuildOpenerPanel ? importedNativeOpenerEvents(events) : []
+	const openerPanel = buildImportedOpenerPanel({meta, sourceLabel, job, importedOpenerEvents, allowFallback: shouldBuildOpenerPanel})
 	return {
 		name: meta.Name ?? sourceLabel,
 		territoryId: meta.TerritoryId ?? state.model.encounter.territoryId,
@@ -7534,6 +7751,8 @@ function buildImportedTimelineModel(timelineJson, sourceLabel) {
 		jobName: job.name,
 		acrName: meta.AcrAuthor ?? meta.Author ?? defaultAcrForJob(job.id),
 		opener: meta.Opener ?? '手动填写起手',
+		timelineKind: timelineKind.id,
+		timelineKindLabel: timelineKind.label,
 		events,
 		tracks,
 		timelineRows,
@@ -7542,8 +7761,60 @@ function buildImportedTimelineModel(timelineJson, sourceLabel) {
 			{id: 'mitigation', label: '减伤 / 奶轴', events: tracks.beginner.mitigation},
 			{id: 'damage', label: '输出轴', events: damageEvents.slice(0, 36)},
 			{id: 'potion', label: '爆发药轴', events: tracks.expert.player.filter(event => event.kind === 'potion' || /爆发药/.test(event.name))},
-			{id: 'opener', label: '起手', title: meta.Opener ?? '导入起手', source: sourceLabel, events: openerEvents},
+			openerPanel,
 		],
+	}
+}
+
+function importedNativeOpenerEvents(events = []) {
+	return events
+		.filter(event => ['player-action', 'potion'].includes(event.kind))
+		.filter(event => Number(event.timeMs ?? 0) <= 24000)
+		.filter(isLikelyImportedOpenerEvent)
+		.map(event => ({
+			...event,
+			classification: event.classification ?? 'opener',
+			opener: true,
+		}))
+}
+
+function isLikelyImportedOpenerEvent(event = {}) {
+	return event.kind === 'potion'
+		|| event.output
+		|| event.classification === 'damage'
+		|| Number(event.potency ?? 0) > 0
+}
+
+function buildImportedOpenerPanel({meta = {}, sourceLabel = '本地导入', job = {}, importedOpenerEvents = [], allowFallback = true} = {}) {
+	const fallback = allowFallback ? openerFallbackForImportedJob(job.id) : {events: []}
+	const hasImportedOpener = importedOpenerEvents.length > 0
+	return {
+		id: 'opener',
+		label: '起手',
+		title: meta.Opener ?? fallback.title ?? '导入起手',
+		source: hasImportedOpener ? sourceLabel : fallback.source ?? sourceLabel,
+		events: hasImportedOpener ? importedOpenerEvents : fallback.events,
+	}
+}
+
+function openerFallbackForImportedJob(jobId) {
+	const storedOpener = state.baseAcrOpeners?.[jobId] ?? state.model?.acrOpeners?.[jobId]
+	if (storedOpener?.events?.length) {
+		return {
+			title: storedOpener.source?.name,
+			source: storedOpener.source?.source ?? storedOpener.source?.acr ?? 'ACR 起手',
+			events: storedOpener.events.map(event => openerDetailEvent({...event})),
+		}
+	}
+	const baseSimulation = Array.isArray(state.baseAcrSimulation?.events) && state.baseAcrSimulation?.source?.job === jobId
+		? state.baseAcrSimulation
+		: null
+	return {
+		title: baseSimulation?.source?.name,
+		source: baseSimulation?.source?.mode ?? 'ACR 模拟',
+		events: (baseSimulation?.events ?? [])
+			.filter(event => Number(event.timeMs ?? 0) <= 24000)
+			.map(event => openerDetailEvent({...event, source: event.source ?? baseSimulation.source?.acr ?? 'ACR 模拟'})),
 	}
 }
 
@@ -7571,6 +7842,8 @@ function buildModelFromExportTimeline(timelineJson, sourceLabel) {
 		jobName: job.name,
 		acrName: meta.acr ?? defaultAcrForJob(job.id) ?? '未指定',
 		opener: timelineJson.opener?.title ?? state.model.encounter.opener ?? '手动填写起手',
+		timelineKind: 'webtimeline',
+		timelineKindLabel: 'WebTimeline 导出',
 		events: [...boss, ...allPlayer],
 		manual,
 		focusedSkills: Array.isArray(timelineJson.focusedSkills) ? timelineJson.focusedSkills.map(String) : [],
@@ -7841,9 +8114,10 @@ function buildBurstGroupsFromExport(burstPackages, playerEvents) {
 	return buildImportedBurstGroups(playerEvents)
 }
 
-function flattenImportedTimeline(timelineJson) {
+function flattenImportedTimeline(timelineJson, timelineKind = detectTimelineImportKind(timelineJson)) {
 	const bossCasts = collectBossCastItems(state.model.timelineRows)
-	const {events} = flattenPrTimeline(timelineJson, {
+	const flattenTimeline = timelineKind.id === 'ptl' ? flattenPtlTimeline : flattenPrTimeline
+	const {events} = flattenTimeline(timelineJson, {
 		resolveConditionTimeMs: (condition, cursorMs) => resolveBossCastConditionTimeMs(condition, cursorMs, bossCasts),
 		shouldBlockOnUnresolvedCondition: ({conditions}) => conditions.some(isBlockingImportedCondition),
 		actionRecastMs: ({action}) => Number(actionById(action?.ActionId)?.recastMs ?? 0),
@@ -8064,6 +8338,9 @@ function buildWebTimelineExportFromState() {
 }
 
 function exportNativePrTimeline() {
+	if (detectTimelineImportKind(state.currentTimelineJson).id === 'ptl') {
+		return jsonClone(state.currentTimelineJson)
+	}
 	if (state.currentTimelineJson?.Root) {
 		const nativeMeta = state.currentTimelineJson.Meta
 			? jsonClone(state.currentTimelineJson.Meta)

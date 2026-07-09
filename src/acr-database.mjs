@@ -48,6 +48,9 @@ const JOB_PATTERNS = [
 	['PCT', /\bPCT\b|Pictomancer|绘灵/i],
 ]
 
+const MAX_DISCOVERY_ENTRIES = 1800
+const MAX_QT_NAME_LENGTH = 80
+
 export function buildAcrDatabase(packages = [], acrSources = FALLBACK_ACR_SUPPORT) {
 	const packageSet = new Set(packages)
 	const support = mergeAcrSources(acrSources.length ? acrSources : FALLBACK_ACR_SUPPORT)
@@ -62,6 +65,7 @@ export function buildAcrDatabase(packages = [], acrSources = FALLBACK_ACR_SUPPOR
 			const acrs = supported.map(source => ({
 				name: source.package,
 				enabled: packageSet.size ? packageSet.has(source.package) : true,
+				qtControls: normalizeQtControls(source.qtControls?.[job.id] ?? []),
 				source: source.source ?? '反编译 ACR',
 			}))
 			const enabled = acrs.some(acr => acr.enabled)
@@ -87,13 +91,16 @@ export async function discoverAcrSources(relativeOrAbsoluteRoot = '../资源/dat
 	for (const directory of directories) {
 		const packageName = packageNameForDirectory(directory.name, manifest)
 		const fullPath = path.join(root, directory.name)
-		const jobs = await discoverJobsInDirectory(fullPath)
+		const discoveredJobs = await discoverJobsInDirectory(fullPath)
+		const jobs = discoveredJobs.length ? discoveredJobs : fallbackJobsForPackage(packageName)
 		if (jobs.length) {
+			const qtControls = await discoverQtControlsInDirectory(fullPath, jobs)
 			sources.push({
 				package: packageName,
 				jobs,
 				source: '反编译 ACR',
 				path: fullPath,
+				qtControls,
 			})
 		}
 	}
@@ -140,7 +147,7 @@ async function discoverJobsInDirectory(root) {
 	const queue = [root]
 	let visited = 0
 
-	while (queue.length && visited < 900) {
+	while (queue.length && visited < MAX_DISCOVERY_ENTRIES) {
 		visited += 1
 		const current = queue.shift()
 		const text = normalizePathForMatching(current)
@@ -178,6 +185,185 @@ function matchJobsFromFileName(fileName, hits) {
 	}
 }
 
+async function discoverQtControlsInDirectory(root, jobs = []) {
+	const files = await collectCsFiles(root)
+	const controlsByJob = new Map(jobs.map(job => [job, new Map()]))
+	for (const file of files) {
+		const matchedJobs = jobsForFilePath(file, jobs)
+		if (!matchedJobs.length) {
+			continue
+		}
+		let text = ''
+		try {
+			text = await readFile(file, 'utf8')
+		} catch {
+			continue
+		}
+		const controls = extractQtControlsFromSource(text, path.relative(root, file))
+		if (!controls.length) {
+			continue
+		}
+		for (const job of matchedJobs) {
+			const target = controlsByJob.get(job) ?? new Map()
+			for (const control of controls) {
+				mergeQtControl(target, control)
+			}
+			controlsByJob.set(job, target)
+		}
+	}
+	return Object.fromEntries(
+		[...controlsByJob.entries()]
+			.map(([job, controls]) => [job, [...controls.values()]])
+			.filter(([, controls]) => controls.length),
+	)
+}
+
+async function collectCsFiles(root) {
+	const files = []
+	const queue = [root]
+	let visited = 0
+	while (queue.length && visited < MAX_DISCOVERY_ENTRIES) {
+		visited += 1
+		const current = queue.shift()
+		let entries = []
+		try {
+			entries = await readdir(current, {withFileTypes: true})
+		} catch {
+			continue
+		}
+		for (const entry of entries) {
+			const fullPath = path.join(current, entry.name)
+			if (entry.isDirectory()) {
+				queue.push(fullPath)
+				continue
+			}
+			if (entry.isFile() && entry.name.endsWith('.cs')) {
+				files.push(fullPath)
+			}
+		}
+	}
+	return files
+}
+
+function jobsForFilePath(filePath, sourceJobs = []) {
+	const normalized = normalizePathForMatching(filePath)
+	const hits = []
+	for (const [job, pattern] of JOB_PATTERNS) {
+		if (sourceJobs.includes(job) && pattern.test(normalized)) {
+			hits.push(job)
+		}
+	}
+	if (hits.length) {
+		return hits.sort((left, right) => jobOrder(left) - jobOrder(right))
+	}
+	return sourceJobs.length === 1 ? [...sourceJobs] : []
+}
+
+function extractQtControlsFromSource(text, sourceFile = '') {
+	if (!mightContainQtControls(text, sourceFile)) {
+		return []
+	}
+	const controls = new Map()
+	const add = (name, defaultEnabled = false, sourceKind = 'source') => {
+		const cleaned = cleanQtControlName(name)
+		if (!cleaned) {
+			return
+		}
+		mergeQtControl(controls, {
+			name: cleaned,
+			defaultEnabled: Boolean(defaultEnabled),
+			sourceFile: normalizePathForMatching(sourceFile),
+			sourceKind,
+		})
+	}
+
+	for (const match of text.matchAll(/\{\s*"([^"\r\n]+)"\s*,\s*(true|false)\s*\}/gi)) {
+		add(match[1], match[2].toLowerCase() === 'true', 'dictionary')
+	}
+	for (const match of text.matchAll(/\[\s*"([^"\r\n]+)"\s*\]\s*=\s*(true|false)/gi)) {
+		add(match[1], match[2].toLowerCase() === 'true', 'dictionary')
+	}
+	for (const match of text.matchAll(/\b(?:AddQt|SetQt)\s*\(\s*"([^"\r\n]+)"\s*,\s*(true|false)/gi)) {
+		add(match[1], match[2].toLowerCase() === 'true', 'qt-call')
+	}
+	for (const match of text.matchAll(/\bGetQt\s*\(\s*"([^"\r\n]+)"/gi)) {
+		add(match[1], false, 'qt-call')
+	}
+	if (isLikelyQtCatalog(text, sourceFile)) {
+		for (const match of text.matchAll(/\b(?:const\s+string|(?:public|private|internal|protected)?\s*(?:static\s+)?string)\s+[^\s=]+\s*=\s*"([^"\r\n]+)"/gi)) {
+			add(match[1], false, 'const')
+		}
+	}
+
+	return [...controls.values()]
+}
+
+function mightContainQtControls(text, sourceFile) {
+	return /qt/i.test(sourceFile) || /\b(?:QtList|AddQt|SetQt|GetQt|DrawQTs|HiddenQts)\b/i.test(text)
+}
+
+function isLikelyQtCatalog(text, sourceFile) {
+	return /qt/i.test(sourceFile)
+		|| /\bQtList\b/i.test(text)
+		|| /\bHiddenQts\b/i.test(text)
+		|| /\bDrawQTs\b/i.test(text)
+		|| /Dictionary\s*<\s*string\s*,\s*bool\s*>/i.test(text)
+}
+
+function cleanQtControlName(name) {
+	const cleaned = String(name ?? '')
+		.replace(/\\"/g, '"')
+		.replace(/\s+/g, ' ')
+		.trim()
+	if (!cleaned || cleaned.length > MAX_QT_NAME_LENGTH) {
+		return ''
+	}
+	if (/[\r\n{};]/.test(cleaned)) {
+		return ''
+	}
+	if (/^(true|false|null|qt)$/i.test(cleaned)) {
+		return ''
+	}
+	if (/未开启QT|QtCols|QT 开关状态|QT\s*开关状态/i.test(cleaned)) {
+		return ''
+	}
+	return cleaned
+}
+
+function normalizeQtControls(controls = []) {
+	const byName = new Map()
+	for (const control of controls) {
+		mergeQtControl(byName, control)
+	}
+	return [...byName.values()]
+}
+
+function mergeQtControl(target, control) {
+	const name = cleanQtControlName(control?.name)
+	if (!name) {
+		return
+	}
+	const existing = target.get(name)
+	if (!existing) {
+		target.set(name, {
+			name,
+			defaultEnabled: Boolean(control.defaultEnabled),
+			sourceFile: control.sourceFile ? normalizePathForMatching(control.sourceFile) : undefined,
+			sourceKind: control.sourceKind ?? 'source',
+		})
+		return
+	}
+	if (!existing.defaultEnabled && control.defaultEnabled) {
+		existing.defaultEnabled = true
+	}
+	if (!existing.sourceFile && control.sourceFile) {
+		existing.sourceFile = normalizePathForMatching(control.sourceFile)
+	}
+	if (!existing.sourceKind && control.sourceKind) {
+		existing.sourceKind = control.sourceKind
+	}
+}
+
 function mergeAcrSources(sources) {
 	const byPackage = new Map()
 	for (const source of sources) {
@@ -190,14 +376,32 @@ function mergeAcrSources(sources) {
 				jobs: [],
 				source: source.source ?? '反编译 ACR',
 				path: source.path,
+				qtControls: {},
 			})
 		}
 		const target = byPackage.get(source.package)
 		target.jobs = [...new Set([...target.jobs, ...(source.jobs ?? [])])]
 			.filter(job => COMBAT_JOBS.some(item => item.id === job))
 			.sort((left, right) => jobOrder(left) - jobOrder(right))
+		target.qtControls = mergeQtControlMaps(target.qtControls, source.qtControls)
 	}
 	return [...byPackage.values()].filter(source => source.jobs.length)
+}
+
+function mergeQtControlMaps(left = {}, right = {}) {
+	const result = {}
+	for (const [job, controls] of Object.entries(left ?? {})) {
+		result[job] = normalizeQtControls(controls)
+	}
+	for (const [job, controls] of Object.entries(right ?? {})) {
+		result[job] = normalizeQtControls([...(result[job] ?? []), ...(controls ?? [])])
+	}
+	return result
+}
+
+function fallbackJobsForPackage(packageName) {
+	const source = FALLBACK_ACR_SUPPORT.find(item => item.package === packageName)
+	return source?.jobs?.length ? [...source.jobs] : []
 }
 
 async function readManifest(root) {

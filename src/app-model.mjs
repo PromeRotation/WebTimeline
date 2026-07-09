@@ -12,15 +12,25 @@ export function createPrototypeModel(timelineFixture, packages = [], bossTimelin
 	const acrSources = options.acrSources ?? []
 	const runtimeSources = options.runtimeSources ?? []
 	const events = flattenTimeline(timelineFixture, skillDatabase)
+	const blankPlayerTimeline = Boolean(options.blankPlayerTimeline)
+	const visibleEvents = blankPlayerTimeline
+		? events.filter(event => event.kind === 'boss-cast')
+		: events
 	const acrSimulation = options.acrSimulation ?? buildKanoDrkSimulation(skillDatabase, {durationMs: bossTimeline?.source?.lastSecond ? Math.round(bossTimeline.source.lastSecond * 1000) : 720000})
-	const openerEvents = options.sourceOpener?.events ?? acrSimulation.events.filter(event => event.timeMs < (options.openerPanelEndMs ?? OPENER_PANEL_END_MS))
+	const acrOpeners = buildAcrOpeners(options.sourceOpener)
+	const visibleSimulationEvents = blankPlayerTimeline ? [] : acrSimulation.events
+	const openerEvents = blankPlayerTimeline ? [] : options.sourceOpener?.events ?? acrSimulation.events.filter(event => event.timeMs < (options.openerPanelEndMs ?? OPENER_PANEL_END_MS))
 	const openerTitle = options.sourceOpener?.source?.name ?? timelineFixture.Meta?.Opener ?? '妖星100级起手'
 	const openerSource = options.sourceOpener?.source?.source ?? 'ACR 模拟'
-	const tracks = buildModeTracks(events)
-	tracks.beginner.simulated = acrSimulation.events.slice(0, 64)
-	tracks.expert.simulated = acrSimulation.events
-	const timelineRows = mergeBossRows(buildTimelineRows(events, [], acrSimulation.events), bossTimeline)
-	const damageEvents = acrSimulation.events.filter(event => event.output)
+	const tracks = buildModeTracks(visibleEvents)
+	if (blankPlayerTimeline) {
+		tracks.beginner.burst = []
+		tracks.expert.burst = []
+	}
+	tracks.beginner.simulated = visibleSimulationEvents.slice(0, 64)
+	tracks.expert.simulated = visibleSimulationEvents
+	const timelineRows = mergeBossRows(buildTimelineRows(visibleEvents, [], visibleSimulationEvents), bossTimeline)
+	const damageEvents = blankPlayerTimeline ? [] : acrSimulation.events.filter(event => event.output)
 	const averageDamage = estimateDamage(damageEvents, {
 		attackPower: 120,
 		critRate: 0.18,
@@ -48,7 +58,7 @@ export function createPrototypeModel(timelineFixture, packages = [], bossTimelin
 		],
 		detailPanels: [
 			{id: 'mitigation', label: '减伤 / 奶轴', events: tracks.beginner.mitigation},
-			{id: 'damage', label: '输出轴', events: acrSimulation.events.filter(event => event.output).slice(0, 36)},
+			{id: 'damage', label: '输出轴', events: damageEvents.slice(0, 36)},
 			{id: 'potion', label: '爆发药轴', events: tracks.expert.player.filter(event => event.kind === 'potion' || /爆发药/.test(event.name))},
 			{id: 'opener', label: '起手', title: openerTitle, source: openerSource, events: openerEvents},
 		],
@@ -59,6 +69,7 @@ export function createPrototypeModel(timelineFixture, packages = [], bossTimelin
 		} : null,
 		tracks,
 		acrSimulation,
+		acrOpeners,
 		damage: {
 			average: averageDamage,
 			lucky: luckyDamage,
@@ -74,11 +85,25 @@ export function createPrototypeModel(timelineFixture, packages = [], bossTimelin
 			runtimeSources,
 		},
 		skillDatabase,
-		sourceTimeline: timelineFixture,
+		sourceTimeline: blankPlayerTimeline ? null : timelineFixture,
 		shareCard: {
 			timelineName: timelineFixture.Meta?.Name ?? '妖星时间轴',
 			title: '分享预览',
 			subtitle: '个人展示模式：后续可生成只读链接，展示编辑者、职业、ACR 和模拟结果。',
+		},
+	}
+}
+
+function buildAcrOpeners(sourceOpener = null) {
+	const job = sourceOpener?.source?.job
+	const events = Array.isArray(sourceOpener?.events) ? sourceOpener.events : []
+	if (!job || !events.length) {
+		return {}
+	}
+	return {
+		[job]: {
+			source: {...sourceOpener.source},
+			events: events.map(event => ({...event})),
 		},
 	}
 }

@@ -3,11 +3,93 @@ import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {
 	collectBossCastItems,
+	detectTimelineImportKind,
 	flattenPrTimeline,
+	flattenPtlTimeline,
 	resolveBossCastConditionTimeMs,
 } from '../public/timeline-import-parser.js'
 import * as timelineImportParser from '../public/timeline-import-parser.js'
 import {buildSkillDatabase, classifyAction} from '../src/skill-database.mjs'
+
+test('detects traditional PR trigger timelines separately from PTL timelines', () => {
+	assert.deepEqual(detectTimelineImportKind({Root: {Type: 'serial'}}), {
+		id: 'trigger',
+		label: '传统触发轴',
+	})
+	assert.deepEqual(detectTimelineImportKind({
+		Version: 1,
+		Meta: {Name: 'PTL sample'},
+		Anchors: [],
+		Entries: [],
+	}), {
+		id: 'ptl',
+		label: 'PTL 时间轴',
+	})
+})
+
+test('flattens PTL entries from anchor time plus entry offset while keeping phase anchors', () => {
+	const startAnchorGuid = '11111111-1111-1111-1111-111111111111'
+	const phaseTwoAnchorGuid = '22222222-2222-2222-2222-222222222222'
+	const endAnchorGuid = '33333333-3333-3333-3333-333333333333'
+	const timeline = {
+		Version: 1,
+		Meta: {Name: 'PTL sample', JobId: 32, AcrAuthor: 'KANO'},
+		Anchors: [
+			{Guid: startAnchorGuid, Name: 'P1 Start', Time: 0, IsPhaseAnchor: true, Sync: {Type: 'InCombat'}},
+			{Guid: phaseTwoAnchorGuid, Name: 'P2', Time: 120, IsPhaseAnchor: true},
+			{Guid: endAnchorGuid, Name: 'End', Time: 180, IsEndAnchor: true},
+		],
+		Entries: [
+			{
+				Guid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+				Name: 'P1 mitigation',
+				StartAnchorGuid: startAnchorGuid,
+				Offset: 10.5,
+				EntryGroup: {
+					Type: 'serial',
+					Enabled: true,
+					Children: [
+						{Type: 'delay', Enabled: true, DelayMs: 500},
+						{Type: 'action', Enabled: true, Actions: [{Type: 'EnqueueSkill', ActionId: 7531}]},
+					],
+				},
+			},
+			{
+				Guid: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+				Name: 'P2 burst',
+				StartAnchorGuid: phaseTwoAnchorGuid,
+				Offset: 2,
+				EntryGroup: {
+					Type: 'action',
+					Enabled: true,
+					Actions: [{Type: 'EnqueueSkill', ActionId: 16471}],
+				},
+			},
+			{
+				Guid: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+				Name: 'Out of bounds',
+				StartAnchorGuid: phaseTwoAnchorGuid,
+				Offset: 90,
+				EntryGroup: {
+					Type: 'action',
+					Enabled: true,
+					Actions: [{Type: 'EnqueueSkill', ActionId: 99999}],
+				},
+			},
+		],
+	}
+	const result = flattenPtlTimeline(timeline, {
+		actionEvents: ({action, node}) => [{kind: 'player-action', name: node.Name, actionId: action.ActionId}],
+		delayEvent: ({node}) => ({kind: 'delay', name: node.Name}),
+	})
+	const actions = result.events.filter(event => event.kind === 'player-action')
+
+	assert.deepEqual(actions.map(event => [event.actionId, event.timeMs, event.phase, event.phaseStartMs]), [
+		[7531, 11000, 'P1', 0],
+		[16471, 122000, 'P2', 120000],
+	])
+	assert.equal(result.endMs, 180000)
+})
 
 test('flattens PR parallel branches without serially accumulating their delays', () => {
 	const timeline = {
@@ -52,6 +134,49 @@ test('flattens PR parallel branches without serially accumulating their delays',
 		[90002, 32000],
 	])
 	assert.equal(result.endMs, 32000)
+})
+
+test('keeps PR phase state isolated between parallel sibling branches', () => {
+	const result = flattenPrTimeline({
+		Root: {
+			Type: 'parallel',
+			Enabled: true,
+			Children: [
+				{
+					Name: 'phase branch',
+					Type: 'serial',
+					Enabled: true,
+					Children: [
+						{Name: 'P5', Type: 'serial', Enabled: true, Children: [
+							{Type: 'delay', Enabled: true, DelayMs: 1000},
+							{Type: 'action', Enabled: true, Actions: [{Type: 'EnqueueSkill', ActionId: 90011}]},
+						]},
+					],
+				},
+				{
+					Name: 'qt init branch',
+					Type: 'serial',
+					Enabled: true,
+					Children: [
+						{Name: 'QT init', Type: 'action', Enabled: true, Actions: [{Type: 'BatchTriggerQt'}]},
+					],
+				},
+			],
+		},
+	}, {
+		actionEvents: ({action, node}) => [{
+			kind: action.Type === 'BatchTriggerQt' ? 'qt-control' : 'player-action',
+			actionId: action.ActionId ?? action.Type,
+			name: node.Name,
+		}],
+	})
+	const phaseAction = result.events.find(event => event.actionId === 90011)
+	const qtInit = result.events.find(event => event.actionId === 'BatchTriggerQt')
+
+	assert.equal(phaseAction.phase, 'P5')
+	assert.equal(phaseAction.phaseStartMs, 0)
+	assert.equal(qtInit.phase, 'P1')
+	assert.equal(qtInit.phaseStartMs, 0)
 })
 
 test('collects boss cast rows and resolves repeated CastStart conditions to the next matching occurrence', () => {
@@ -282,6 +407,23 @@ test('normalizes phase-tagged PR events against imported boss phase windows', ()
 	])
 	assert.equal(normalized[2].startMs, 429520)
 	assert.equal(normalized[2].endMs, 444520)
+})
+
+test('does not double-shift absolute PR trigger times that are slightly before a boss phase window', () => {
+	const source = {
+		lastSecond: 1095,
+		phases: [
+			{id: 1, startSecond: 0},
+			{id: 5, startSecond: 897.51},
+		],
+	}
+	const normalized = timelineImportParser.normalizePhaseTaggedEvents([
+		{phase: 'P5', phaseStartMs: 0, timeMs: 2000, actionId: 16471},
+		{phase: 'P5', phaseStartMs: 0, timeMs: 844374, actionId: 16471},
+	], source)
+
+	assert.deepEqual(normalized.map(event => event.timeMs), [899510, 844374])
+	assert.deepEqual(normalized.map(event => event.phaseStartMs), [897510, 897510])
 })
 
 test('imports the real Sage PR timeline with mitigation and healing durations from the skill database', async () => {

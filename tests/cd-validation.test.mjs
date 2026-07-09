@@ -112,6 +112,28 @@ test('moveExistingTimelineEventAtTimeline checks CD conflict for imported events
 	assert.match(moveExistingSource, /return/)
 })
 
+test('checkCooldownConflict excludes the imported timeline event being moved from baselines', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const conflictSource = appSource.slice(
+		appSource.indexOf('function checkCooldownConflict('),
+		appSource.indexOf('function timelineCooldownBaselineEvents('),
+	)
+
+	assert.match(conflictSource, /const excludeId = options\.excludeId/)
+	assert.match(conflictSource, /baselineEvents[\s\S]*?\.filter\(item => item\.id !== excludeId\)/)
+})
+
+test('checkCooldownConflict ignores future imported cooldown baselines when moving earlier events', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const conflictSource = appSource.slice(
+		appSource.indexOf('function checkCooldownConflict('),
+		appSource.indexOf('function timelineCooldownBaselineEvents('),
+	)
+
+	assert.match(conflictSource, /Number\(item\.timeMs \?\? item\.startMs \?\? 0\) <= requestedTimeMs/)
+	assert.match(conflictSource, /Number\(item\.requestedTimeMs \?\? item\.timeMs \?\? 0\) <= requestedTimeMs/)
+})
+
 test('checkCooldownConflict handles unknown actionId gracefully', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
 	const conflictSource = appSource.slice(

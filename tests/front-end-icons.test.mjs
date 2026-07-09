@@ -3,6 +3,7 @@ import {execFile} from 'node:child_process'
 import {readFile} from 'node:fs/promises'
 import test from 'node:test'
 import {promisify} from 'node:util'
+import {detectTimelineImportKind} from '../public/timeline-import-parser.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -88,7 +89,8 @@ test('mitigation phase rows dedupe imported duplicate actions by action and time
 	assert.match(appSource, /function uniqueDetailDisplayEvents\(/)
 	assert.match(appSource, /function detailDisplayEventKey\(/)
 	assert.match(appSource, /const imported = filterCooldownConflictingTimelineItems\(uniqueTimelineDisplayEvents\(\[\.\.\.mitigationItems, \.\.\.manualItems\]\)\)/)
-	assert.match(appSource, /return sortTimelineItems\(uniqueTimelineDisplayEvents\(\[\.\.\.imported, \.\.\.simulatedItems\]\)\)/)
+	assert.match(appSource, /omitTimelineItemsWithKeys\(imported, excludedDisplayKeys\)/)
+	assert.match(appSource, /return sortTimelineItems\(uniqueTimelineDisplayEvents\(\[\.\.\.omitTimelineItemsWithKeys\(imported, excludedDisplayKeys\), \.\.\.simulatedItems\]\)\)/)
 	assert.match(appSource, /const recastMs = Number\(event\.recastMs \?\? actionById\(actionId\)\?\.recastMs \?\? 0\)/)
 	assert.match(appSource, /return uniqueDetailDisplayEvents\(detailEventsForCurrentPhase\(uniqueDetailEvents\(/)
 	assert.match(appSource, /event\.manualId \? `manual:\$\{event\.manualId\}`/)
@@ -107,6 +109,10 @@ test('front-end filters phase rows before applying visible item limits', async (
 
 test('imported non-DRK timelines receive current job ACR simulation fallback', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
+	const simulationSource = appSource.slice(
+		appSource.indexOf('function buildAcrSimulationForImportedJob('),
+		appSource.indexOf('function acrSimulationEventFromAction('),
+	)
 
 	assert.match(appSource, /function buildAcrSimulationForImportedJob\(/)
 	assert.match(appSource, /const acrSimulation = buildAcrSimulationForImportedJob\(imported\)/)
@@ -118,7 +124,7 @@ test('imported non-DRK timelines receive current job ACR simulation fallback', a
 	assert.match(appSource, /classification:\s*'damage'/)
 	assert.match(appSource, /output:\s*true/)
 	assert.doesNotMatch(appSource, /imported\.jobId === 'DRK' && state\.baseAcrSimulation/)
-	assert.doesNotMatch(appSource, /events:\s*\[\]\}/)
+	assert.doesNotMatch(simulationSource, /events:\s*\[\]\}/)
 })
 
 test('ACR simulated row filters mitigation and healing into the mitigation lane', async () => {
@@ -133,9 +139,9 @@ test('ACR simulated row filters mitigation and healing into the mitigation lane'
 	assert.match(buildRows, /id:\s*'acr-simulated',\s*label:\s*t\('rail\.acrSim'\),\s*accent:\s*'sky',\s*items:\s*simulatedOutput\.map/)
 	assert.doesNotMatch(buildRows, /items:\s*simulated\.map\(event => timelineItemForEvent/)
 	// mitigation row must receive simulatedMitigation as the third argument
-	assert.match(buildRows, /buildMitigationLaneItems\(mitigation,\s*manual,\s*simulatedMitigation\)/)
+	assert.match(buildRows, /buildMitigationLaneItems\(mitigation,\s*manual,\s*simulatedMitigation,\s*openerItemKeys\)/)
 	// buildMitigationLaneItems must accept simulatedCoverage and map it with simulated: true
-	assert.match(mitigationLaneSource, /function buildMitigationLaneItems\(mitigation = \[\], manual = \[\], simulatedCoverage = \[\]\)/)
+	assert.match(mitigationLaneSource, /function buildMitigationLaneItems\(mitigation = \[\], manual = \[\], simulatedCoverage = \[\], excludedDisplayKeys = new Set\(\)\)/)
 	assert.match(mitigationLaneSource, /const simulatedItems = simulatedCoverage/)
 	assert.match(mitigationLaneSource, /\.map\(event => timelineItemForEvent\(event, \{defaultType: 'action', simulated: true\}\)\)/)
 })
@@ -209,6 +215,37 @@ test('tools panel keeps FFLogs comparison and removes placeholder import source 
 	assert.doesNotMatch(css, /\.source-row/)
 	assert.doesNotMatch(modelSource, /importSources/)
 	assert.doesNotMatch(prototype, /"importSources"/)
+})
+
+test('bundled default prototype opens as a boss-only blank timeline', async () => {
+	const prototype = JSON.parse(await readFile('public/data/prototype.json', 'utf8'))
+	const functionalRows = new Map(prototype.timelineRows.map(row => [row.id, row]))
+
+	assert.ok(prototype.timelineRows.some(row => (row.groupId ?? row.id) === 'boss-casts' && row.items.length > 0))
+	assert.ok(prototype.timelineRows.some(row => (row.groupId ?? row.id) === 'boss-damage' && row.items.length > 0))
+	assert.deepEqual(prototype.tracks.expert.player, [])
+	assert.deepEqual(prototype.tracks.expert.mitigation, [])
+	assert.deepEqual(prototype.tracks.expert.burst, [])
+	assert.deepEqual(prototype.tracks.expert.qt, [])
+	assert.deepEqual(prototype.tracks.expert.simulated, [])
+	assert.deepEqual(prototype.detailPanels.map(panel => [panel.id, panel.events.length]), [
+		['mitigation', 0],
+		['damage', 0],
+		['potion', 0],
+		['opener', 0],
+	])
+	assert.equal(functionalRows.get('player-actions')?.items.length, 0)
+	assert.equal(functionalRows.get('mitigation-actions')?.items.length, 0)
+	assert.equal(functionalRows.get('acr-simulated')?.items.length, 0)
+	assert.equal(functionalRows.get('qt-potion')?.items.length, 0)
+	assert.equal(prototype.damage.events.length, 0)
+	assert.equal(prototype.sourceTimeline, null)
+})
+
+test('ACR simulation is hidden on first editor open unless the user enabled it', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+
+	assert.match(appSource, /showAcrSimulation:\s*localStorage\.getItem\('webtimelineShowAcrSimulation'\)\s*===\s*'1'/)
 })
 
 test('FFLogs comparison sends the full current player axis to the server', async () => {
@@ -286,6 +323,35 @@ test('timeline editor mode clearly separates browse and edit interactions', asyn
 	assert.match(css, /right:\s*-15px/)
 	assert.match(css, /\.timeline-delete-button\s*\{[\s\S]*z-index:\s*12/)
 	assert.match(css, /\.skill-card\.acr-locked\s*\{/)
+})
+
+test('existing imported timeline events support pointer dragging in edit mode', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const pointerDownSource = appSource.slice(
+		appSource.indexOf("document.addEventListener('pointerdown'"),
+		appSource.indexOf("document.addEventListener('pointermove'"),
+	)
+	const pointerMoveSource = appSource.slice(
+		appSource.indexOf("document.addEventListener('pointermove'"),
+		appSource.indexOf("document.addEventListener('pointerup'"),
+	)
+	const pointerUpSource = appSource.slice(
+		appSource.indexOf("document.addEventListener('pointerup'"),
+		appSource.indexOf("document.addEventListener('pointercancel'"),
+	)
+
+	assert.match(appSource, /let existingTimelineEventDrag = null/)
+	assert.match(appSource, /function canStartExistingTimelineEventDrag\(/)
+	assert.match(appSource, /function startExistingTimelineEventDrag\(/)
+	assert.match(appSource, /function moveExistingTimelineEventDrag\(/)
+	assert.match(appSource, /function endExistingTimelineEventDrag\(/)
+	assert.match(appSource, /function moveExistingTimelineEventAtClientPoint\(/)
+	assert.match(pointerDownSource, /closest\('\[data-timeline-event-key\]'\)/)
+	assert.match(pointerDownSource, /canStartExistingTimelineEventDrag\(timelineEvent, event\)/)
+	assert.match(pointerDownSource, /startExistingTimelineEventDrag\(event, timelineEvent\)/)
+	assert.match(pointerMoveSource, /moveExistingTimelineEventDrag\(event\)/)
+	assert.match(pointerUpSource, /endExistingTimelineEventDrag\(event\)/)
+	assert.match(appSource, /moveExistingTimelineEventAtClientPoint\(eventKey,\s*event\.clientX,\s*event\.clientY\)/)
 })
 
 test('insert skill panel is a movable floating editor-only palette', async () => {
@@ -624,6 +690,21 @@ test('insert skill palette is current-job only with burst package categories', a
 	assert.doesNotMatch(css, /rgba\(255,\s*160,\s*176/)
 })
 
+test('QT insert controls fall back to current ACR database controls', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const insertQtSource = appSource.slice(appSource.indexOf('function insertQtControls('), appSource.indexOf('function qtStatePanelItems('))
+	const fallbackSource = appSource.slice(appSource.indexOf('function acrQtControlsForCurrentSelection('), appSource.indexOf('function qtDraftKey('))
+
+	assert.match(appSource, /function acrQtControlsForCurrentSelection\(/)
+	assert.match(insertQtSource, /const acrItems = acrQtControlsForCurrentSelection\(\)/)
+	assert.match(insertQtSource, /if \(acrItems\.length\)/)
+	assert.match(fallbackSource, /state\.model\.acrDatabase\.jobs\.find\(job => job\.id === state\.job\)/)
+	assert.match(fallbackSource, /job\?\.acrs\.find\(acr => acr\.name === state\.acr\)/)
+	assert.match(fallbackSource, /qtControls/)
+	assert.match(fallbackSource, /source:\s*acr\.name/)
+	assert.match(fallbackSource, /acr-database/)
+})
+
 test('insert skill id entry is compact and auto-matches action names', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
 	const css = await readFile('public/styles.css', 'utf8')
@@ -693,7 +774,12 @@ test('main timeline renders the opener detail panel as its own visible row', asy
 
 	assert.match(buildRows, /const openerPanel = state\.model\.detailPanels\.find\(panel => panel\.id === 'opener'\)/)
 	assert.match(buildRows, /const openerItems = openerDetailEvents\(openerPanel\)\.map\(event => timelineItemForEvent\(event/)
+	assert.match(buildRows, /const openerItemKeys = new Set\(openerItems\.map\(timelineDisplayEventKey\)\)/)
 	assert.match(buildRows, /\{id:\s*'opener-actions',\s*label:\s*t\('overview\.opener'\),\s*accent:\s*'violet',\s*keepWhenEmpty:\s*true,\s*items:\s*openerItems\}/)
+	assert.match(buildRows, /buildOutputLaneItems\(player, manual, openerItemKeys\)/)
+	assert.match(buildRows, /buildMitigationLaneItems\(mitigation, manual, simulatedMitigation, openerItemKeys\)/)
+	assert.match(appSource, /function omitTimelineItemsWithKeys\(/)
+	assert.match(appSource, /excludedDisplayKeys\.has\(timelineDisplayEventKey\(item\)\)/)
 })
 
 test('editable timeline lanes stay visible when the active phase has no imported actions', async () => {
@@ -730,12 +816,26 @@ test('timeline drops only accept skills in their matching functional lane', asyn
 	assert.match(appSource, /row\.id === 'qt-controls'\)\s*return 'qt'/)
 	assert.match(appSource, /dropLane === 'locked'/)
 	assert.match(skillDropSource, /const dropLane = timelineDropLaneAtClientPoint\(event\.clientX,\s*event\.clientY\) \|\| timelineDropLaneForTarget\(event\.target\)/)
-	assert.match(skillDropSource, /if \(!canDropActionOnTimelineLane\(actionId, dropLane\)\)/)
+	assert.match(skillDropSource, /if \(!canDropActionOnTimelineLane\(actionId, effectiveDropLane\)\)/)
 	assert.match(skillPointerSource, /const dropLane = timelineDropLaneAtClientPoint\(clientX, clientY\)/)
+	assert.match(skillPointerSource, /if \(!canDropActionOnTimelineLane\(actionId, effectiveDropLane\)\)/)
 	assert.match(burstDropSource, /const dropLane = timelineDropLaneAtClientPoint\(event\.clientX,\s*event\.clientY\) \|\| timelineDropLaneForTarget\(event\.target\)/)
 	assert.match(burstDropSource, /if \(!canDropBurstPackageOnTimelineLane\(dropLane\)\)/)
 	assert.match(burstPointerSource, /const dropLane = timelineDropLaneAtClientPoint\(clientX, clientY\)/)
 	assert.match(burstPointerSource, /if \(!canDropBurstPackageOnTimelineLane\(dropLane\)\)/)
+})
+
+test('blank boss-only timelines route skill drops from locked boss rows into the matching editable lane', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const skillDropSource = appSource.slice(appSource.indexOf('function insertSkillAtTimeline('), appSource.indexOf('function insertSkillAtVisibleTimeline('))
+	const skillPointerSource = appSource.slice(appSource.indexOf('function insertSkillAtClientPoint('), appSource.indexOf('function insertSkillAtVisibleTimeline('))
+
+	assert.match(appSource, /function effectiveActionDropLane\(/)
+	assert.match(appSource, /dropLane === 'locked'\s*\?\s*actionTimelineDropLane\(actionId\)\s*:\s*dropLane/)
+	assert.match(skillDropSource, /const effectiveDropLane = effectiveActionDropLane\(actionId,\s*dropLane\)/)
+	assert.match(skillDropSource, /if \(!canDropActionOnTimelineLane\(actionId,\s*effectiveDropLane\)\)/)
+	assert.match(skillPointerSource, /const effectiveDropLane = effectiveActionDropLane\(actionId,\s*dropLane\)/)
+	assert.match(skillPointerSource, /if \(!canDropActionOnTimelineLane\(actionId,\s*effectiveDropLane\)\)/)
 })
 
 test('manual insert queue checks cooldowns against existing timeline events before shifting skills', async () => {
@@ -1109,6 +1209,45 @@ test('timeline export preserves the imported PR Meta and Root for native plugin 
 	assert.doesNotMatch(exportSource, /Root:\s*\{[\s\S]*?Children:\s*state\.inserted\.map/)
 })
 
+test('timeline export preserves imported PTL payloads instead of generating an empty PR root', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const nativeExportSource = appSource.slice(appSource.indexOf('function exportNativePrTimeline('), appSource.indexOf('function defaultNativeTimelineMeta('))
+	const ptlTimeline = {
+		Version: 1,
+		Meta: {Name: 'PTL sample', JobId: 40},
+		Anchors: [{Guid: 'start', Name: 'P1', Time: 0, IsPhaseAnchor: true}],
+		Entries: [{
+			Guid: 'entry-1',
+			Name: 'P1 action',
+			StartAnchorGuid: 'start',
+			Offset: 12,
+			EntryGroup: {
+				Type: 'action',
+				Actions: [{Type: 'EnqueueSkill', ActionId: 24283}],
+			},
+		}],
+	}
+	const runExport = new Function(
+		'state',
+		'detectTimelineImportKind',
+		'jsonClone',
+		'defaultNativeTimelineMeta',
+		`${nativeExportSource}\nreturn exportNativePrTimeline();`,
+	)
+
+	const exported = runExport(
+		{currentTimelineJson: ptlTimeline, inserted: []},
+		detectTimelineImportKind,
+		value => JSON.parse(JSON.stringify(value)),
+		() => ({Name: 'fallback'}),
+	)
+
+	assert.deepEqual(exported, ptlTimeline)
+	assert.notEqual(exported, ptlTimeline)
+	assert.notEqual(exported.Entries, ptlTimeline.Entries)
+	assert.equal(exported.Root, undefined)
+})
+
 test('timeline import restores action durations from the skill database when exports omit them', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
 
@@ -1385,7 +1524,7 @@ test('output lane deduplicates items with the same actionId, time and type', asy
 	const appSource = await readFile('public/app.js', 'utf8')
 	const outputSource = appSource.slice(appSource.indexOf('function buildOutputLaneItems('), appSource.indexOf('function buildMitigationLaneItems('))
 
-	assert.match(outputSource, /return sortTimelineItems\(uniqueTimelineDisplayEvents\(\[\.\.\.playerItems, \.\.\.manualItems\]\)\)/)
+	assert.match(outputSource, /return sortTimelineItems\(omitTimelineItemsWithKeys\(uniqueTimelineDisplayEvents\(\[\.\.\.playerItems, \.\.\.manualItems\]\), excludedDisplayKeys\)\)/)
 	assert.doesNotMatch(outputSource, /compactTimelineQtEvents/)
 })
 
@@ -1484,6 +1623,58 @@ test('overview opener section keeps opener events visible across selected phases
 	assert.match(importSource, /opener:\s*true/)
 })
 
+test('manual inserted skills are not classified as opener just because they are early', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const manualPanelSource = appSource.slice(
+		appSource.indexOf('function manualEventsForPanel('),
+		appSource.indexOf('function manualClassificationLabel('),
+	)
+
+	assert.match(manualPanelSource, /panelId === 'opener'/)
+	assert.doesNotMatch(manualPanelSource, /Number\(event\.timeMs \?\? 0\) <= 24000/)
+	assert.match(manualPanelSource, /event\.classification === 'opener'/)
+	assert.match(manualPanelSource, /event\.opener === true/)
+})
+
+test('native timeline import falls back to stored ACR opener when the imported axis has no opener actions', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const prototype = JSON.parse(await readFile('public/data/prototype.json', 'utf8'))
+	const stateSource = appSource.slice(appSource.indexOf('const state = {'), appSource.indexOf('async function init('))
+	const initSource = appSource.slice(appSource.indexOf('async function init('), appSource.indexOf('function renderApp('))
+	const importSource = appSource.slice(
+		appSource.indexOf('function buildImportedTimelineModel('),
+		appSource.indexOf('function buildModelFromExportTimeline('),
+	)
+
+	assert.match(stateSource, /baseAcrOpeners:\s*\{\}/)
+	assert.match(initSource, /state\.baseAcrOpeners = state\.model\.acrOpeners \?\? \{\}/)
+	assert.match(importSource, /const importedOpenerEvents = shouldBuildOpenerPanel \? importedNativeOpenerEvents\(events\) : \[\]/)
+	assert.match(importSource, /const openerPanel = buildImportedOpenerPanel\(\{meta,\s*sourceLabel,\s*job,\s*importedOpenerEvents,\s*allowFallback:\s*shouldBuildOpenerPanel\}\)/)
+	assert.match(appSource, /function importedNativeOpenerEvents\(/)
+	assert.match(appSource, /function openerFallbackForImportedJob\(/)
+	assert.match(appSource, /state\.baseAcrOpeners\?\.\[jobId\]/)
+	assert.equal(prototype.acrOpeners.DRK.source.name, 'MT妖星乱舞100级起手')
+	assert.deepEqual(prototype.acrOpeners.DRK.events.slice(0, 6).map(event => event.actionId), [3617, 44162, 16470, 3623, 16472, 7531])
+})
+
+test('PTL timeline import does not synthesize or fallback to opener actions', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const importSource = appSource.slice(
+		appSource.indexOf('function buildImportedTimelineModel('),
+		appSource.indexOf('function buildModelFromExportTimeline('),
+	)
+	const openerPanelSource = appSource.slice(
+		appSource.indexOf('function buildImportedOpenerPanel('),
+		appSource.indexOf('function openerFallbackForImportedJob('),
+	)
+
+	assert.match(importSource, /const shouldBuildOpenerPanel = timelineKind\.id !== 'ptl'/)
+	assert.match(importSource, /const importedOpenerEvents = shouldBuildOpenerPanel \? importedNativeOpenerEvents\(events\) : \[\]/)
+	assert.match(importSource, /allowFallback:\s*shouldBuildOpenerPanel/)
+	assert.match(openerPanelSource, /allowFallback = true/)
+	assert.match(openerPanelSource, /allowFallback \? openerFallbackForImportedJob\(job\.id\) : \{events: \[\]\}/)
+})
+
 test('overview section toggles are decoupled from the right skill library', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
 	const rightPanelSource = appSource.slice(
@@ -1572,6 +1763,34 @@ test('right detail sidebar uses a single overview title without tab headers', as
 	assert.match(css, /\.right-skill-item\.tracked\s*\{/)
 	assert.match(css, /\.right-module-card\s*\{/)
 	assert.match(css, /\.right-module-card \.detail-collapse\s*\{/)
+})
+
+test('timeline import path detects and displays trigger versus PTL timeline types', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const importBlock = appSource.slice(
+		appSource.indexOf("from './timeline-import-parser.js'") - 220,
+		appSource.indexOf("from './timeline-import-parser.js'") + 80,
+	)
+	const modelSource = appSource.slice(
+		appSource.indexOf('function buildImportedTimelineModel('),
+		appSource.indexOf('function buildModelFromExportTimeline('),
+	)
+	const flattenSource = appSource.slice(
+		appSource.indexOf('function flattenImportedTimeline('),
+		appSource.indexOf('function isBlockingImportedCondition('),
+	)
+	const topbarSource = appSource.slice(
+		appSource.indexOf('function renderTopbar('),
+		appSource.indexOf('function renderJobAcrStatus('),
+	)
+
+	assert.match(importBlock, /detectTimelineImportKind/)
+	assert.match(importBlock, /flattenPtlTimeline/)
+	assert.match(modelSource, /const timelineKind = detectTimelineImportKind\(timelineJson\)/)
+	assert.match(modelSource, /timelineKindLabel:\s*timelineKind\.label/)
+	assert.match(flattenSource, /timelineKind\.id === 'ptl'\s*\?\s*flattenPtlTimeline/)
+	assert.match(topbarSource, /model\.encounter\.timelineKindLabel/)
+	assert.match(appSource, /data-timeline-kind/)
 })
 
 test('right skill library trace button locates timeline items without adding focused skills', async () => {

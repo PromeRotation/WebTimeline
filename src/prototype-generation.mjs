@@ -85,14 +85,39 @@ function mergePrototypeAcrSources(sources) {
 			byPackage.set(source.package, {
 				...source,
 				jobs: [...new Set(source.jobs ?? [])],
+				qtControls: mergeQtControlMaps({}, source.qtControls),
 			})
 			continue
 		}
 		existing.jobs = [...new Set([...(existing.jobs ?? []), ...(source.jobs ?? [])])]
+		existing.qtControls = mergeQtControlMaps(existing.qtControls, source.qtControls)
 		if (source.source === '源码 ACR') {
 			existing.source = source.source
 			existing.path = source.path
 		}
 	}
 	return [...byPackage.values()]
+}
+
+function mergeQtControlMaps(left = {}, right = {}) {
+	const result = {}
+	for (const [job, controls] of Object.entries(left ?? {})) {
+		result[job] = dedupeQtControls(controls)
+	}
+	for (const [job, controls] of Object.entries(right ?? {})) {
+		result[job] = dedupeQtControls([...(result[job] ?? []), ...(controls ?? [])])
+	}
+	return result
+}
+
+function dedupeQtControls(controls = []) {
+	const byName = new Map()
+	for (const control of controls) {
+		const name = String(control?.name ?? '').trim()
+		if (!name || byName.has(name)) {
+			continue
+		}
+		byName.set(name, control)
+	}
+	return [...byName.values()]
 }
