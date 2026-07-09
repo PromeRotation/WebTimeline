@@ -153,12 +153,10 @@ export function flattenPtlTimeline(timelineJson, options = {}) {
 	const functionalAnchors = anchors
 		.filter(anchor => !ptlBool(anchor, 'IsCommentAnchor') && !ptlBool(anchor, 'IsTechnicalAnchor'))
 		.sort((left, right) => ptlNumber(left, 'Time') - ptlNumber(right, 'Time') || ptlString(left, 'Guid').localeCompare(ptlString(right, 'Guid')))
+	const phaseMarkers = ptlPhaseMarkers(anchors, functionalAnchors)
 	const events = []
 	let sequence = 0
 	let endMs = Math.max(...functionalAnchors.map(anchor => secondsToMs(ptlNumber(anchor, 'Time'))), 0)
-	let currentPhase = 'P1'
-	let currentPhaseStartMs = 0
-	let phaseIndex = 1
 
 	for (let index = 0; index < functionalAnchors.length - 1; index += 1) {
 		const startAnchor = functionalAnchors[index]
@@ -168,14 +166,6 @@ export function flattenPtlTimeline(timelineJson, options = {}) {
 		const segmentDurationSeconds = endTimeSeconds - startTimeSeconds
 		if (segmentDurationSeconds <= 0) {
 			continue
-		}
-		if (ptlBool(startAnchor, 'IsPhaseAnchor') || index === 0) {
-			const nextPhase = phaseNameForAnchor(startAnchor, phaseIndex)
-			if (nextPhase !== currentPhase || index === 0) {
-				currentPhase = nextPhase
-				phaseIndex += 1
-			}
-			currentPhaseStartMs = secondsToMs(startTimeSeconds)
 		}
 		const segmentEntries = entries
 			.filter(entry => ptlEnabled(entry) && sameGuid(ptlString(entry, 'StartAnchorGuid'), ptlString(startAnchor, 'Guid')))
@@ -187,17 +177,21 @@ export function flattenPtlTimeline(timelineJson, options = {}) {
 				continue
 			}
 			const entryStartMs = secondsToMs(startTimeSeconds + offsetSeconds)
+			const entryPhase = ptlPhaseContextAtMs(entryStartMs, phaseMarkers)
 			const entryGroup = ptlValue(entry, 'EntryGroup') ?? ptlValue(entry, 'EntryGroupDef') ?? {Type: 'serial', Enabled: true}
 			const result = flattenPrTimeline({Root: entryGroup}, {
 				...options,
 				initialTimeMs: entryStartMs,
-				initialPhase: currentPhase,
-				initialPhaseStartMs: currentPhaseStartMs,
+				initialPhase: entryPhase.phase,
+				initialPhaseStartMs: entryPhase.phaseStartMs,
 				eventIdPrefix: `ptl-${++sequence}`,
 			})
 			for (const event of result.events) {
+				const eventPhase = ptlPhaseContextAtMs(eventTimeMs(event), phaseMarkers)
 				events.push({
 					...event,
+					phase: eventPhase.phase,
+					phaseStartMs: eventPhase.phaseStartMs,
 					ptlEntryName: ptlString(entry, 'Name'),
 					ptlEntryGuid: ptlString(entry, 'Guid'),
 					sourceKind: 'ptl',
@@ -245,6 +239,38 @@ export function normalizePhaseTaggedEvents(events = [], bossSource = null) {
 		return events
 	}
 	return events.map(event => normalizePhaseTaggedEvent(event, windows))
+}
+
+export function tagEventsByPhaseWindows(events = [], bossSource = null) {
+	const phases = [...phaseWindowsById(bossSource).values()]
+		.sort((left, right) => Number(left.startMs ?? 0) - Number(right.startMs ?? 0))
+	if (!phases.length) {
+		return events
+	}
+	return events.map(event => {
+		const phase = phaseWindowForTime(eventTimeMs(event), phases)
+		if (!phase) {
+			return event
+		}
+		return {
+			...event,
+			phase: phase.id.toUpperCase(),
+			phaseStartMs: phase.startMs,
+		}
+	})
+}
+
+function phaseWindowForTime(timeMs, phases = []) {
+	const time = Number(timeMs)
+	if (!Number.isFinite(time)) {
+		return null
+	}
+	return phases.find((phase, index) => {
+		const startMs = Number(phase.startMs ?? 0)
+		const nextStartMs = Number(phases[index + 1]?.startMs ?? phase.endMs ?? 0)
+		const endMs = Math.max(startMs, nextStartMs)
+		return time >= startMs && (endMs <= startMs || time < endMs)
+	}) ?? phases.at(-1) ?? null
 }
 
 function resolveConditionNodeTimeMs(node, cursorMs, options = {}) {
@@ -421,6 +447,45 @@ function phaseWindowsById(bossSource = null) {
 function normalizedPhaseId(phase) {
 	const match = /^p?(\d+)$/i.exec(String(phase ?? '').trim())
 	return match ? `p${match[1]}` : ''
+}
+
+function ptlPhaseMarkers(anchors = [], functionalAnchors = []) {
+	const firstFunctionalTimeMs = secondsToMs(ptlNumber(functionalAnchors[0], 'Time'))
+	const phaseAnchors = anchors
+		.filter(anchor => !ptlBool(anchor, 'IsCommentAnchor') && ptlBool(anchor, 'IsPhaseAnchor'))
+		.sort((left, right) => ptlNumber(left, 'Time') - ptlNumber(right, 'Time') || ptlString(left, 'Guid').localeCompare(ptlString(right, 'Guid')))
+	const markers = []
+	let fallbackIndex = 1
+	if (!phaseAnchors.some(anchor => Math.abs(secondsToMs(ptlNumber(anchor, 'Time')) - firstFunctionalTimeMs) <= 1)) {
+		markers.push({phase: 'P1', phaseStartMs: firstFunctionalTimeMs})
+		fallbackIndex = 2
+	}
+	for (const anchor of phaseAnchors) {
+		const phase = phaseNameForAnchor(anchor, fallbackIndex)
+		markers.push({
+			phase,
+			phaseStartMs: secondsToMs(ptlNumber(anchor, 'Time')),
+		})
+		const phaseNumber = Number(/^P(\d+)$/i.exec(phase)?.[1] ?? 0)
+		fallbackIndex = Math.max(fallbackIndex + 1, phaseNumber + 1)
+	}
+	return markers.length ? markers : [{phase: 'P1', phaseStartMs: firstFunctionalTimeMs}]
+}
+
+function ptlPhaseContextAtMs(timeMs, markers = []) {
+	const time = Number(timeMs)
+	let selected = markers[0] ?? {phase: 'P1', phaseStartMs: 0}
+	if (!Number.isFinite(time)) {
+		return selected
+	}
+	for (const marker of markers) {
+		if (Number(marker.phaseStartMs ?? 0) <= time + 1) {
+			selected = marker
+		} else {
+			break
+		}
+	}
+	return selected
 }
 
 function ptlValue(object = {}, pascalName) {

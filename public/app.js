@@ -29,6 +29,7 @@ import {
 	flattenPtlTimeline,
 	normalizePhaseTaggedEvents,
 	resolveBossCastConditionTimeMs,
+	tagEventsByPhaseWindows,
 } from './timeline-import-parser.js'
 
 /* ============================================================
@@ -2885,7 +2886,7 @@ function renderTimelineRowLabel(row) {
    Each dot maps to one row in the current phase; clicking it
    hides/shows that row's label + track together. State lives
    in state.hiddenTimelineRows (an array of stable row keys)
-   and survives phase switches + timeline imports.
+   and survives phase switches.
    ============================================================ */
 
 function currentVisualTimelineRows(model) {
@@ -2908,6 +2909,14 @@ function visibleTimelineRows(rows) {
 		return rows
 	}
 	return rows.filter(row => !isTimelineRowHidden(row))
+}
+
+function resetTimelineRowVisibility() {
+	if (!state.hiddenTimelineRows.length) {
+		return
+	}
+	state.hiddenTimelineRows = []
+	saveHiddenTimelineRows()
 }
 
 function timelineRowAccentColor(row) {
@@ -7612,6 +7621,7 @@ function applyImportedTimeline(timelineJson, sourceLabel = '本地导入') {
 	state.job = imported.jobId
 	state.acr = imported.acrName
 	state.phase = 'all'
+	resetTimelineRowVisibility()
 	state.focusedSkills = imported.focusedSkills ?? []
 	state.inserted = (imported.manual ?? []).map(event => ({
 		...event,
@@ -8172,7 +8182,9 @@ function flattenImportedTimeline(timelineJson, timelineKind = detectTimelineImpo
 			}]
 		},
 	})
-	return normalizePhaseTaggedEvents(events, state.model.bossTimeline?.source)
+	return timelineKind.id === 'ptl'
+		? tagEventsByPhaseWindows(events, state.model.bossTimeline?.source)
+		: normalizePhaseTaggedEvents(events, state.model.bossTimeline?.source)
 }
 
 function isBlockingImportedCondition(condition = {}) {

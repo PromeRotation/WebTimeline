@@ -7,6 +7,7 @@ import {
 	flattenPrTimeline,
 	flattenPtlTimeline,
 	resolveBossCastConditionTimeMs,
+	tagEventsByPhaseWindows,
 } from '../public/timeline-import-parser.js'
 import * as timelineImportParser from '../public/timeline-import-parser.js'
 import {buildSkillDatabase, classifyAction} from '../src/skill-database.mjs'
@@ -89,6 +90,81 @@ test('flattens PTL entries from anchor time plus entry offset while keeping phas
 		[16471, 122000, 'P2', 120000],
 	])
 	assert.equal(result.endMs, 180000)
+})
+
+test('assigns PTL events to technical phase anchors without using them as segment boundaries', () => {
+	const startAnchorGuid = '11111111-1111-1111-1111-111111111111'
+	const p2LabelGuid = '22222222-2222-2222-2222-222222222222'
+	const mechanicTwoGuid = '33333333-3333-3333-3333-333333333333'
+	const p3LabelGuid = '44444444-4444-4444-4444-444444444444'
+	const mechanicThreeGuid = '55555555-5555-5555-5555-555555555555'
+	const endAnchorGuid = '66666666-6666-6666-6666-666666666666'
+	const timeline = {
+		Version: 1,
+		Meta: {Name: 'PTL technical phase sample'},
+		Anchors: [
+			{Guid: startAnchorGuid, Name: 'Start', Time: 0, Sync: {Type: 'InCombat'}},
+			{Guid: p2LabelGuid, Name: 'Label: p2-success', Time: 120, IsPhaseAnchor: true, IsTechnicalAnchor: true},
+			{Guid: mechanicTwoGuid, Name: 'P2 mechanic', Time: 140},
+			{Guid: p3LabelGuid, Name: 'Label: p3-success', Time: 220, IsPhaseAnchor: true, IsTechnicalAnchor: true},
+			{Guid: mechanicThreeGuid, Name: 'P3 mechanic', Time: 240},
+			{Guid: endAnchorGuid, Name: 'End', Time: 300, IsEndAnchor: true},
+		],
+		Entries: [
+			{
+				Guid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+				Name: 'P2 action',
+				StartAnchorGuid: mechanicTwoGuid,
+				Offset: 10,
+				EntryGroup: {
+					Type: 'action',
+					Actions: [{Type: 'EnqueueSkill', ActionId: 16471}],
+				},
+			},
+			{
+				Guid: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+				Name: 'P3 action',
+				StartAnchorGuid: mechanicThreeGuid,
+				Offset: 5,
+				EntryGroup: {
+					Type: 'action',
+					Actions: [{Type: 'EnqueueSkill', ActionId: 7393}],
+				},
+			},
+		],
+	}
+
+	const result = flattenPtlTimeline(timeline, {
+		actionEvents: ({action, node}) => [{kind: 'player-action', name: node.Name, actionId: action.ActionId}],
+	})
+	const actions = result.events.filter(event => event.kind === 'player-action')
+
+	assert.deepEqual(actions.map(event => [event.actionId, event.timeMs, event.phase, event.phaseStartMs]), [
+		[16471, 150000, 'P2', 120000],
+		[7393, 245000, 'P3', 220000],
+	])
+})
+
+test('tags absolute PTL events by imported boss phase windows for phase filtering', () => {
+	const source = {
+		lastSecond: 500,
+		phases: [
+			{id: 1, startSecond: 0},
+			{id: 2, startSecond: 208.97},
+			{id: 3, startSecond: 428.52},
+		],
+	}
+	const tagged = tagEventsByPhaseWindows([
+		{kind: 'player-action', actionId: 7535, timeMs: 171700, phase: 'P1', phaseStartMs: 0},
+		{kind: 'player-action', actionId: 16471, timeMs: 215101, phase: 'P1', phaseStartMs: 0},
+		{kind: 'player-action', actionId: 7393, timeMs: 437000, phase: 'P1', phaseStartMs: 0},
+	], source)
+
+	assert.deepEqual(tagged.map(event => [event.actionId, event.phase, event.phaseStartMs]), [
+		[7535, 'P1', 0],
+		[16471, 'P2', 208970],
+		[7393, 'P3', 428520],
+	])
 })
 
 test('flattens PR parallel branches without serially accumulating their delays', () => {

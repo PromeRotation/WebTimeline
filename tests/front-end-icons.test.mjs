@@ -11,6 +11,12 @@ test('front-end app script is syntactically valid JavaScript', async () => {
 	await execFileAsync(process.execPath, ['--check', 'public/app.js'])
 })
 
+test('app html cache-busts the PTL phase import fix', async () => {
+	const html = await readFile('public/app.html', 'utf8')
+
+	assert.match(html, /<script type="module" src="\.\/app\.js\?v=20260709-ptl-phase-v1"><\/script>/)
+})
+
 test('front-end no longer renders the old onboarding overlay', async () => {
 	const appSource = await readFile('public/app.js', 'utf8')
 	const css = await readFile('public/styles.css', 'utf8')
@@ -1786,11 +1792,31 @@ test('timeline import path detects and displays trigger versus PTL timeline type
 
 	assert.match(importBlock, /detectTimelineImportKind/)
 	assert.match(importBlock, /flattenPtlTimeline/)
+	assert.match(importBlock, /tagEventsByPhaseWindows/)
 	assert.match(modelSource, /const timelineKind = detectTimelineImportKind\(timelineJson\)/)
 	assert.match(modelSource, /timelineKindLabel:\s*timelineKind\.label/)
 	assert.match(flattenSource, /timelineKind\.id === 'ptl'\s*\?\s*flattenPtlTimeline/)
+	assert.match(flattenSource, /timelineKind\.id === 'ptl'[\s\S]*tagEventsByPhaseWindows\(events,\s*state\.model\.bossTimeline\?\.source\)[\s\S]*normalizePhaseTaggedEvents\(events,\s*state\.model\.bossTimeline\?\.source\)/)
 	assert.match(topbarSource, /model\.encounter\.timelineKindLabel/)
 	assert.match(appSource, /data-timeline-kind/)
+})
+
+test('timeline import resets row visibility so imported phase lanes are visible', async () => {
+	const appSource = await readFile('public/app.js', 'utf8')
+	const applySource = appSource.slice(
+		appSource.indexOf('function applyImportedTimeline('),
+		appSource.indexOf('async function loadFflogsComparison('),
+	)
+	const visibilityComment = appSource.slice(
+		appSource.indexOf('Timeline visibility rail'),
+		appSource.indexOf('function currentVisualTimelineRows('),
+	)
+
+	assert.match(appSource, /function resetTimelineRowVisibility\(/)
+	assert.match(appSource, /state\.hiddenTimelineRows = \[\]/)
+	assert.match(appSource, /saveHiddenTimelineRows\(\)/)
+	assert.match(applySource, /resetTimelineRowVisibility\(\)/)
+	assert.doesNotMatch(visibilityComment, /timeline imports/)
 })
 
 test('right skill library trace button locates timeline items without adding focused skills', async () => {
